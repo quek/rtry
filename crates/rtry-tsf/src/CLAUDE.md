@@ -8,15 +8,17 @@ Try-Code Windows IME の TSF (Text Services Framework) 実装。
 - `ITfTextInputProcessor` - Activate/Deactivate（text_service.rs）
 - `ITfKeyEventSink` - OnTestKeyDown/OnKeyDown/OnPreservedKey（key_handler.rs）
 - `ITfCompositionSink` - OnCompositionTerminated（text_service.rs）
-- `ITfEditSession` - DoEditSession の 3 種類（edit_session.rs）
+- `ITfEditSession` - DoEditSession の 6 種類（edit_session.rs）
 - `IClassFactory` - CreateInstance（class_factory.rs）
 
 ### ファイル構成
 - `lib.rs` - DllMain, DllGetClassObject 等の DLL エントリポイント、GUID 定義
 - `text_service.rs` - TryCodeTextService 本体（Activate/Deactivate、エンジン初期化）
-- `key_handler.rs` - キーイベント処理、IME オン/オフトグル、vk_to_char 変換
-- `edit_session.rs` - CommitEditSession, ComposingEditSession, EndCompositionEditSession
+- `key_handler.rs` - キーイベント処理、IME オン/オフトグル、vk_to_char 変換、交ぜ書きキー処理
+- `edit_session.rs` - Commit, Composing, EndComposition, CharHelp, MazegakiStart, MazegakiUpdate の各 EditSession
 - `composition.rs` - SharedComposition（Arc<Mutex<Option<ITfComposition>>>）
+- `candidate_window.rs` - 交ぜ書き候補ウィンドウ（Win32ポップアップ、番号付き候補表示）
+- `stroke_help.rs` - ストロークヘルプ表示、カーソル位置取得（get_caret_screen_pos）
 - `language_bar.rs` - 言語バーボタン
 - `register.rs` - regsvr32 用の COM/TSF 登録処理
 - `class_factory.rs` - IClassFactory 実装

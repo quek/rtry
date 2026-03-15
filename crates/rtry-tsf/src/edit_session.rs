@@ -10,11 +10,13 @@ use windows::core::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::UI::TextServices::*;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use rtry_core::mazegaki::MazegakiDictionary;
 use rtry_core::table::TryCodeTable;
 
 use crate::composition::SharedComposition;
+use crate::text_service::MazegakiState;
 
 /// 文字列確定用のエディットセッション
 #[implement(ITfEditSession)]
@@ -256,6 +258,160 @@ impl ITfEditSession_Impl for CharHelpEditSession_Impl {
                 let msg = format!("「{}」 {}", ch, stroke_strs.join(" / "));
                 crate::debug_log!("CharHelp: '{}' → {}", ch, msg);
                 crate::stroke_help::show_stroke_help(&msg);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// 交ぜ書き変換開始用のエディットセッション
+///
+/// カーソル前のテキストを読み取り、辞書で最長一致検索し、
+/// 読みの範囲をコンポジションで置換して候補ウィンドウを表示する。
+#[implement(ITfEditSession)]
+pub struct MazegakiStartEditSession {
+    context: ITfContext,
+    shared_comp: SharedComposition,
+    composition_sink: ITfCompositionSink,
+    dict: Arc<MazegakiDictionary>,
+    result_slot: Arc<Mutex<Option<MazegakiState>>>,
+}
+
+impl MazegakiStartEditSession {
+    pub(crate) fn new(
+        context: ITfContext,
+        shared_comp: SharedComposition,
+        composition_sink: ITfCompositionSink,
+        dict: Arc<MazegakiDictionary>,
+        result_slot: Arc<Mutex<Option<MazegakiState>>>,
+    ) -> Self {
+        MazegakiStartEditSession {
+            context, shared_comp, composition_sink, dict, result_slot,
+        }
+    }
+}
+
+impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
+    fn DoEditSession(&self, ec: u32) -> Result<()> {
+        unsafe {
+            // カーソル位置を取得
+            let mut sel = [TF_SELECTION::default()];
+            let mut fetched = 0u32;
+            self.context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut sel, &mut fetched)?;
+            if fetched == 0 {
+                return Ok(());
+            }
+
+            let range = std::mem::ManuallyDrop::into_inner(sel[0].range.clone())
+                .ok_or_else(|| Error::from_hresult(E_FAIL))?;
+
+            // カーソル前の最大10文字を読み取り
+            let read_range = range.Clone()?;
+            read_range.Collapse(ec, TF_ANCHOR_START)?;
+            let mut shifted = 0i32;
+            read_range.ShiftStart(ec, -10, &mut shifted, std::ptr::null())?;
+
+            let mut buf = [0u16; 20];
+            let mut cch = 0u32;
+            read_range.GetText(ec, 0, &mut buf, &mut cch)?;
+            if cch == 0 {
+                return Ok(());
+            }
+
+            let text = String::from_utf16_lossy(&buf[..cch as usize]);
+            crate::debug_log!("MazegakiStart: text before cursor = '{}'", text);
+
+            // 最長一致検索
+            let Some((reading_len, reading, candidates)) = self.dict.find_longest_match(&text) else {
+                crate::debug_log!("MazegakiStart: no match found");
+                return Ok(());
+            };
+            crate::debug_log!("MazegakiStart: matched '{}' ({} chars), {} candidates",
+                reading, reading_len, candidates.len());
+
+            // 読みの範囲にコンポジションを開始
+            let comp_range = range.Clone()?;
+            comp_range.Collapse(ec, TF_ANCHOR_START)?;
+            comp_range.ShiftStart(ec, -(reading_len as i32), &mut shifted, std::ptr::null())?;
+
+            let ctx_comp: ITfContextComposition = self.context.cast()?;
+            let composition = ctx_comp.StartComposition(
+                ec,
+                &comp_range,
+                &self.composition_sink,
+            )?;
+
+            // 第一候補でテキスト置換
+            let first = &candidates[0];
+            let text_w: Vec<u16> = first.encode_utf16().collect();
+            let comp_range2 = composition.GetRange()?;
+            comp_range2.SetText(ec, TF_ST_CORRECTION, &text_w)?;
+
+            // カーソルをコンポジション末尾に移動
+            let sel_range = comp_range2.Clone()?;
+            sel_range.Collapse(ec, TF_ANCHOR_END)?;
+            let selection = TF_SELECTION {
+                range: std::mem::ManuallyDrop::new(Some(sel_range)),
+                style: TF_SELECTIONSTYLE {
+                    ase: TF_AE_NONE,
+                    fInterimChar: false.into(),
+                },
+            };
+            let _ = self.context.SetSelection(ec, &[selection]);
+
+            // SharedComposition にセット
+            self.shared_comp.set(composition);
+
+            // MazegakiState を結果スロットにセット
+            let state = MazegakiState {
+                reading,
+                candidates,
+                selected: 0,
+            };
+            *self.result_slot.lock().unwrap() = Some(state);
+        }
+        Ok(())
+    }
+}
+
+/// 交ぜ書き候補更新用のエディットセッション
+#[implement(ITfEditSession)]
+pub struct MazegakiUpdateEditSession {
+    context: ITfContext,
+    text: String,
+    shared_comp: SharedComposition,
+}
+
+impl MazegakiUpdateEditSession {
+    pub fn new(
+        context: ITfContext,
+        text: String,
+        shared_comp: SharedComposition,
+    ) -> Self {
+        MazegakiUpdateEditSession { context, text, shared_comp }
+    }
+}
+
+impl ITfEditSession_Impl for MazegakiUpdateEditSession_Impl {
+    fn DoEditSession(&self, ec: u32) -> Result<()> {
+        unsafe {
+            if let Some(composition) = self.shared_comp.get() {
+                let range = composition.GetRange()?;
+                let text_w: Vec<u16> = self.text.encode_utf16().collect();
+                range.SetText(ec, TF_ST_CORRECTION, &text_w)?;
+
+                let sel_range = range.Clone()?;
+                sel_range.Collapse(ec, TF_ANCHOR_END)?;
+                let selection = TF_SELECTION {
+                    range: std::mem::ManuallyDrop::new(Some(sel_range)),
+                    style: TF_SELECTIONSTYLE {
+                        ase: TF_AE_NONE,
+                        fInterimChar: false.into(),
+                    },
+                };
+                let _ = self.context.SetSelection(ec, &[selection]);
+
+                crate::debug_log!("MazegakiUpdate: updated to '{}'", self.text);
             }
         }
         Ok(())

@@ -62,6 +62,11 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
             return Ok(FALSE);
         }
 
+        // 交ぜ書き変換中は全キー消費
+        if self.mazegaki_state.lock().unwrap().is_some() {
+            return Ok(TRUE);
+        }
+
         let engine = self.engine.borrow();
         let Some(ref engine) = *engine else {
             return Ok(FALSE);
@@ -116,6 +121,11 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
 
         let context = pic.clone().ok_or_else(|| Error::from_hresult(E_INVALIDARG))?;
 
+        // 交ぜ書き変換中のキー処理
+        if self.mazegaki_state.lock().unwrap().is_some() {
+            return self.handle_mazegaki_key(&context, wparam);
+        }
+
         let mut engine_ref = self.engine.borrow_mut();
         let Some(ref mut engine) = *engine_ref else {
             return Ok(FALSE);
@@ -148,6 +158,9 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                 match func {
                     SpecialFunction::CharHelp(_) => {
                         self.do_char_help(&context)?;
+                    }
+                    SpecialFunction::MazegakiConvert => {
+                        self.do_mazegaki_start(&context)?;
                     }
                     _ => {
                         crate::debug_log!("Unhandled special action: {:?}", func);
@@ -249,6 +262,135 @@ impl TryCodeTextService_Impl {
         let session: ITfEditSession = session.into();
         unsafe {
             let _ = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE)?;
+        }
+        Ok(())
+    }
+
+    /// 交ぜ書き変換を開始する
+    fn do_mazegaki_start(&self, context: &ITfContext) -> Result<()> {
+        let dict_ref = self.mazegaki_dict.borrow();
+        let Some(ref dict) = *dict_ref else {
+            crate::debug_log!("Mazegaki: no dictionary loaded");
+            return Ok(());
+        };
+        let dict = dict.clone();
+        drop(dict_ref);
+
+        let tid = *self.client_id.borrow();
+        let this_unknown: IUnknown = self.to_interface();
+        let comp_sink: ITfCompositionSink = this_unknown.cast()?;
+
+        let session = edit_session::MazegakiStartEditSession::new(
+            context.clone(),
+            self.composition.clone(),
+            comp_sink,
+            dict,
+            self.mazegaki_state.clone(),
+        );
+        let session: ITfEditSession = session.into();
+        unsafe {
+            let _ = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE)?;
+        }
+
+        // EditSession 完了後、候補ウィンドウを表示
+        let state = self.mazegaki_state.lock().unwrap();
+        if let Some(ref state) = *state {
+            crate::candidate_window::show_candidates(&state.candidates, state.selected);
+        }
+
+        Ok(())
+    }
+
+    /// 交ぜ書き変換中のキー処理
+    fn handle_mazegaki_key(&self, context: &ITfContext, wparam: WPARAM) -> Result<BOOL> {
+        let vk = wparam.0 as u32;
+
+        match vk {
+            // Space: 次候補
+            0x20 => {
+                let (text, selected, candidates) = {
+                    let mut guard = self.mazegaki_state.lock().unwrap();
+                    let Some(ref mut state) = *guard else {
+                        return Ok(TRUE);
+                    };
+                    state.selected = (state.selected + 1) % state.candidates.len();
+                    (
+                        state.candidates[state.selected].clone(),
+                        state.selected,
+                        state.candidates.clone(),
+                    )
+                };
+                self.do_mazegaki_update(context, &text)?;
+                crate::candidate_window::show_candidates(&candidates, selected);
+                Ok(TRUE)
+            }
+            // Enter: 確定
+            0x0D => {
+                self.do_mazegaki_commit(context)?;
+                Ok(TRUE)
+            }
+            // Escape: キャンセル
+            0x1B => {
+                self.do_mazegaki_cancel(context)?;
+                Ok(TRUE)
+            }
+            // 1-9: 番号選択で確定
+            0x31..=0x39 => {
+                let index = (vk - 0x31) as usize;
+                let mut state = self.mazegaki_state.lock().unwrap();
+                if let Some(ref mut state) = *state {
+                    if index < state.candidates.len() {
+                        state.selected = index;
+                    }
+                }
+                drop(state);
+                self.do_mazegaki_commit(context)?;
+                Ok(TRUE)
+            }
+            // その他: 現在の候補で確定して、そのキーを通常処理へ
+            _ => {
+                self.do_mazegaki_commit(context)?;
+                // 確定後に通常のキー処理を行う
+                Ok(FALSE)
+            }
+        }
+    }
+
+    /// 交ぜ書き候補のテキストを更新
+    fn do_mazegaki_update(&self, context: &ITfContext, text: &str) -> Result<()> {
+        let tid = *self.client_id.borrow();
+        let session = edit_session::MazegakiUpdateEditSession::new(
+            context.clone(),
+            text.to_string(),
+            self.composition.clone(),
+        );
+        let session: ITfEditSession = session.into();
+        unsafe {
+            let _ = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE)?;
+        }
+        Ok(())
+    }
+
+    /// 交ぜ書き変換を確定
+    fn do_mazegaki_commit(&self, context: &ITfContext) -> Result<()> {
+        let state = self.mazegaki_state.lock().unwrap().take();
+        crate::candidate_window::dismiss();
+
+        if let Some(state) = state {
+            let text = state.candidates[state.selected].clone();
+            self.do_commit(context, &text)?;
+        }
+        Ok(())
+    }
+
+    /// 交ぜ書き変換をキャンセル（元の読みに戻す）
+    fn do_mazegaki_cancel(&self, context: &ITfContext) -> Result<()> {
+        let state = self.mazegaki_state.lock().unwrap().take();
+        crate::candidate_window::dismiss();
+
+        if let Some(state) = state {
+            // 元の読みで確定（元に戻す）
+            self.do_commit(context, &state.reading)?;
         }
         Ok(())
     }

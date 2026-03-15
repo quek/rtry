@@ -12,12 +12,15 @@ cargo build --release -p rtry-tsf
 
 ## インストール
 
-### 1. テーブルファイルの配置
+### 1. データファイルの配置
 
 ```cmd
 mkdir %APPDATA%\rtry
 copy data\try.tbl %APPDATA%\rtry\try.tbl
+copy data\mazegaki.dic %APPDATA%\rtry\mazegaki.dic
 ```
+
+交ぜ書き辞書は同梱のサンプル（約300エントリ）の他、[SKK-JISYO.L](https://github.com/skk-dev/dict) を変換して使用できます。
 
 ### 2. DLL登録 (管理者権限が必要)
 
@@ -53,7 +56,7 @@ regsvr32 F:\dev\rtry\target\release\rtry_tsf.dll
 regsvr32 /u F:\dev\rtry\target\release\rtry_tsf.dll
 ```
 
-### 3. テーブルファイルの削除 (任意)
+### 3. データファイルの削除 (任意)
 
 ```cmd
 rmdir /s %APPDATA%\rtry
@@ -67,6 +70,26 @@ Try-Code は2打鍵/3打鍵で直接漢字を入力する方式です。
 - **3打鍵入力**: Space → キー1 → キー2 で拡張テーブルの漢字を入力
 - **Space + Space**: スペースを入力
 - **キー + Space**: そのキーをそのまま出力 (英字入力)
+- **IME オン/オフ**: Alt+` または 半角/全角キー
+
+### 交ぜ書き変換
+
+T-Codeストロークで直接入力できない漢字を、読み（ひらがな）から変換します。
+
+1. ひらがなを入力（例: 「きしゃ」）
+2. `fj` を押す → カーソル前のテキストから最長一致で辞書検索
+3. 候補ウィンドウが表示される
+4. キー操作:
+   - **Space**: 次の候補
+   - **1-9**: 番号で候補を選択して確定
+   - **Enter**: 現在の候補で確定
+   - **Escape**: キャンセル（元の読みに戻す）
+
+### ストロークヘルプ
+
+カーソル直前の文字のストローク（打鍵手順）を表示します。
+
+- `55`（キー5を2回）で起動
 
 ## 注意事項
 

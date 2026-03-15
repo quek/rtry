@@ -72,7 +72,7 @@ pub fn dismiss() {
 }
 
 /// カーソルのスクリーン座標を取得
-unsafe fn get_caret_screen_pos() -> (i32, i32) {
+pub(crate) unsafe fn get_caret_screen_pos() -> (i32, i32) {
     unsafe {
         let mut pt = POINT::default();
         if GetCaretPos(&mut pt).is_ok() {

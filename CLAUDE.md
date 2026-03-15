@@ -4,10 +4,11 @@ T-Code を拡張した Try-Code の Windows IME。Rust で TSF (Text Services Fr
 
 ## プロジェクト構成
 
-- `crates/rtry-core/` - コアエンジン（テーブルパーサー、入力状態マシン、ヒストリ管理）
-- `crates/rtry-tsf/` - Windows TSF DLL（COM インターフェース、キーハンドラ、EditSession）
+- `crates/rtry-core/` - コアエンジン（テーブルパーサー、入力状態マシン、交ぜ書き辞書）
+- `crates/rtry-tsf/` - Windows TSF DLL（COM インターフェース、キーハンドラ、EditSession、候補ウィンドウ）
 - `crates/rtry-config/` - 設定 GUI（未実装）
 - `data/try.tbl` - try-code 変換テーブル（miau氏のgistから取得）
+- `data/mazegaki.dic` - 交ぜ書き辞書サンプル（SKK辞書形式）
 
 ## ユーザー環境
 
@@ -75,8 +76,16 @@ uninstall.bat # regsvr32 /u で DLL 登録解除
 - 1個の深さ2ネストセクション（40個の深さ3サブブロック）= ext table（3打鍵、Space接頭辞）
 - `@m` = 交ぜ書き変換, `@b` = 部首合成, `@q` = ヒストリ入力, `@!` = キャンセル
 
+## 実装済み機能
+- 2打鍵/3打鍵（Space接頭辞）による直接漢字入力
+- 交ぜ書き変換（`fj` トリガー、最長一致、SKK辞書形式）
+- ストロークヘルプ（`55` でカーソル前文字の打鍵手順表示）
+- 候補ウィンドウ（Win32ポップアップ、番号選択対応）
+- IME オン/オフトグル（Alt+` / 半角全角）
+
 ## 未実装機能
-- 交ぜ書き変換（mazegaki）- 辞書と候補選択UI
-- 候補ウィンドウ（ITfCandidateListUIElement）
+- 後置型交ぜ書き変換（18-98）
+- 部首合成（`@b`）
+- ヒストリ入力（`@q`）
 - 設定 GUI（rtry-config）
 - インストーラ

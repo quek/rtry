@@ -8,6 +8,7 @@ mod composition;
 mod language_bar;
 mod register;
 mod stroke_help;
+mod candidate_window;
 
 /// デバッグログをファイルに出力するマクロ
 macro_rules! debug_log {

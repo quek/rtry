@@ -1,15 +1,28 @@
 //! ITfTextInputProcessor 実装
 
 use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
+
 use windows::core::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::UI::TextServices::*;
 
 use rtry_core::engine::Engine;
+use rtry_core::mazegaki::MazegakiDictionary;
 use rtry_core::table::TryCodeTable;
 
 use crate::composition::SharedComposition;
 use crate::language_bar;
+
+/// 交ぜ書き変換の進行状態
+pub(crate) struct MazegakiState {
+    pub candidates: Vec<String>,
+    pub selected: usize,
+    pub reading: String,
+}
+
+/// 交ぜ書き変換状態の共有スロット（EditSession から設定される）
+pub(crate) type SharedMazegakiState = Arc<Mutex<Option<MazegakiState>>>;
 
 #[implement(ITfTextInputProcessor, ITfKeyEventSink, ITfCompositionSink)]
 pub struct TryCodeTextService {
@@ -19,6 +32,8 @@ pub struct TryCodeTextService {
     pub(crate) composition: SharedComposition,
     pub(crate) is_open: RefCell<bool>,
     langbar_button: RefCell<Option<ITfLangBarItemButton>>,
+    pub(crate) mazegaki_state: SharedMazegakiState,
+    pub(crate) mazegaki_dict: RefCell<Option<Arc<MazegakiDictionary>>>,
 }
 
 impl TryCodeTextService {
@@ -31,6 +46,8 @@ impl TryCodeTextService {
             composition: SharedComposition::new(),
             is_open: RefCell::new(true),
             langbar_button: RefCell::new(None),
+            mazegaki_state: Arc::new(Mutex::new(None)),
+            mazegaki_dict: RefCell::new(None),
         }
     }
 
@@ -73,6 +90,30 @@ impl TryCodeTextService {
         std::env::var("APPDATA").ok()
             .map(|p| std::path::PathBuf::from(p).join("rtry").join("try.tbl"))
     }
+
+    /// 交ぜ書き辞書を初期化
+    fn init_mazegaki_dict(&self) {
+        let Some(path) = std::env::var("APPDATA").ok()
+            .map(|p| std::path::PathBuf::from(p).join("rtry").join("mazegaki.dic"))
+        else {
+            return;
+        };
+
+        if !path.exists() {
+            crate::debug_log!("Mazegaki dictionary not found: {:?}", path);
+            return;
+        }
+
+        match MazegakiDictionary::load(&path) {
+            Ok(dict) => {
+                crate::debug_log!("Loaded mazegaki dictionary: {} entries", dict.len());
+                *self.mazegaki_dict.borrow_mut() = Some(Arc::new(dict));
+            }
+            Err(e) => {
+                crate::debug_log!("Failed to load mazegaki dictionary: {}", e);
+            }
+        }
+    }
 }
 
 impl Drop for TryCodeTextService {
@@ -90,6 +131,7 @@ impl ITfTextInputProcessor_Impl for TryCodeTextService_Impl {
 
         crate::debug_log!("Activate called, tid={}", tid);
         self.init_engine();
+        self.init_mazegaki_dict();
 
         // キーイベントシンクの登録
         unsafe {
@@ -115,6 +157,8 @@ impl ITfTextInputProcessor_Impl for TryCodeTextService_Impl {
 
     fn Deactivate(&self) -> Result<()> {
         self.composition.clear();
+        *self.mazegaki_state.lock().unwrap() = None;
+        crate::candidate_window::dismiss();
 
         // 言語バーボタンの削除
         if let Some(ref thread_mgr) = *self.thread_mgr.borrow() {
