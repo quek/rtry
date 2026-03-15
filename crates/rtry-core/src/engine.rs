@@ -87,7 +87,7 @@ impl Engine {
     fn handle_idle(&mut self, key: char) -> EngineOutput {
         if key == ' ' {
             self.state = EngineState::PrefixStroke;
-            return EngineOutput::Composing("■".to_string());
+            return EngineOutput::Consumed;
         }
 
         if let Some(idx) = self.table.key_to_index(key) {
@@ -145,7 +145,7 @@ impl Engine {
 
         if let Some(idx) = self.table.key_to_index(key) {
             self.state = EngineState::ExtFirstStroke(idx);
-            EngineOutput::Composing("■□".to_string())
+            EngineOutput::Consumed
         } else {
             self.state = EngineState::Idle;
             EngineOutput::Clear
