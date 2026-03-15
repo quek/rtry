@@ -72,6 +72,19 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
             return Ok(FALSE);
         };
 
+        // ペンディング中の非マップキー処理
+        if engine.has_pending_stroke() {
+            let vk = wparam.0 as u32;
+            if vk == VK_BACK.0 as u32 {
+                // BS: 消費してペンディングを破棄
+                return Ok(TRUE);
+            }
+            if vk_to_char(wparam).is_none() {
+                // 非マップキー（矢印、Enter等）: パススルー（OnKeyDownでリセット）
+                return Ok(FALSE);
+            }
+        }
+
         let Some(ch) = vk_to_char(wparam) else {
             return Ok(FALSE);
         };
@@ -130,6 +143,23 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
         let Some(ref mut engine) = *engine_ref else {
             return Ok(FALSE);
         };
+
+        // ペンディング中の非マップキー処理
+        if engine.has_pending_stroke() {
+            let vk = wparam.0 as u32;
+            if vk == VK_BACK.0 as u32 {
+                // BS: ペンディングを破棄（消費）
+                crate::debug_log!("OnKeyDown: BS cancels pending stroke");
+                engine.reset();
+                return Ok(TRUE);
+            }
+            if vk_to_char(wparam).is_none() {
+                // 非マップキー: リセットしてパススルー
+                crate::debug_log!("OnKeyDown: non-mapped key resets pending stroke");
+                engine.reset();
+                return Ok(FALSE);
+            }
+        }
 
         let Some(ch) = vk_to_char(wparam) else {
             return Ok(FALSE);

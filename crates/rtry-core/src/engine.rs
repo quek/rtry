@@ -86,6 +86,11 @@ impl Engine {
         }
     }
 
+    /// ストロークがペンディング中か判定
+    pub fn has_pending_stroke(&self) -> bool {
+        self.state != EngineState::Idle
+    }
+
     /// 状態をリセット
     pub fn reset(&mut self) {
         self.state = EngineState::Idle;
