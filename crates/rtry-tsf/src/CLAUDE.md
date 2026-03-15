@@ -13,8 +13,8 @@ Try-Code Windows IME の TSF (Text Services Framework) 実装。
 
 ### ファイル構成
 - `lib.rs` - DllMain, DllGetClassObject 等の DLL エントリポイント、GUID 定義
-- `text_service.rs` - TryCodeTextService 本体（Activate/Deactivate、エンジン初期化）
-- `key_handler.rs` - キーイベント処理、IME オン/オフトグル、vk_to_char 変換、交ぜ書きキー処理
+- `text_service.rs` - TryCodeTextService 本体（Activate/Deactivate、エンジン初期化、SharedPostBuf、PendingReplace）
+- `key_handler.rs` - キーイベント処理、IME オン/オフトグル、vk_to_char 変換、交ぜ書きキー処理、VKBackBasedDeleter
 - `edit_session.rs` - Commit, Composing, EndComposition, CharHelp, MazegakiStart, MazegakiUpdate の各 EditSession
 - `composition.rs` - SharedComposition（Arc<Mutex<Option<ITfComposition>>>）
 - `candidate_window.rs` - 交ぜ書き候補ウィンドウ（Win32ポップアップ、番号付き候補表示）
@@ -56,6 +56,13 @@ CLAUDE.md ファイルを継続的に改善する。
 - `#[unsafe(no_mangle)]` が必要
 - `ManuallyDrop` union フィールドへの書き込みに `(*field)` が必要
 - `unsafe fn` の本体内でも `unsafe {}` ブロックが必要
+
+### CUAS環境（Emacs等）向け postbuf / VKBackBasedDeleter
+- CUAS互換レイヤーのテキストストアは書き込み専用（ShiftStart/GetText が 0 を返す）
+- `SharedPostBuf`: 確定テキストを最大10文字保持する内部バッファ（TSF読み取り失敗時のフォールバック）
+- `PendingReplace`: VKBackBasedDeleterパターン（tsf-tutcode/Mozc由来）の状態
+- 交ぜ書き確定フロー: N+1個のVK_BACKをSendInputで送信 → 最初のN個はOnTestKeyDownでFALSEを返しアプリに渡す → 番兵をIMEが消費してdo_commitを実行
+- `RequestEditSession(TF_ES_ASYNCDONTCARE)` は同期実行される場合があり、SendInputキューより先に処理されるため、SendInput後に直接do_commitを呼んではならない
 
 ### windows crate 0.62 の API
 - COM メソッドの引数は `Ref<'_, T>`（`Option<&T>` ではない）
