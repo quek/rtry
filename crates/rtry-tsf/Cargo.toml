@@ -1,0 +1,14 @@
+[package]
+name = "rtry-tsf"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rtry-core = { path = "../rtry-core" }
+windows = { workspace = true }
+windows-core = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }

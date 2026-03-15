@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(curl -sL \"https://gist.githubusercontent.com/miau/e462157ab7ac316c202c95124c198b3b/raw/try.tbl\" -o F:/dev/rtry/data/try.tbl)",
+      "Bash(cargo search:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo info:*)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:microsoft.github.io)",
+      "Bash(grep -r \"pub use.*implement\\\\|implement.*macro\\\\|proc_macro\\\\|extern crate\" ~/.cargo/registry/src/*/windows-core-0.62.*/src/lib.rs)",
+      "Bash(grep \"windows.implement\\\\|windows-implement\\\\|windows_implement\" ~/.cargo/registry/src/*/windows-core-0.62.*/Cargo.toml)",
+      "Bash(grep -A2 \"windows-implement\" ~/.cargo/registry/src/*/windows-core-0.62.*/Cargo.toml)",
+      "Bash(grep -A10 AddLanguageProfile ~/.cargo/registry/src/*/windows-0.62.*/src/Windows/Win32/UI/TextServices/mod.rs)",
+      "Bash(cargo test:*)",
+      "Bash(cargo doc:*)",
+      "Bash(find /c/Users/ancient/.cargo/registry/src -path */windows-*/Win32/UI/TextServices -type d)",
+      "Bash(ls -la F:/dev/rtry/target/release/*.dll)",
+      "Bash(ls -la F:/dev/rtry/target/release/rtry*)",
+      "Bash(objdump -p target/release/rtry_tsf.dll)",
+      "Bash(iconv -f UTF-8 -t CP932 install.bat)",
+      "Bash(mv install_sjis.bat install.bat)",
+      "Bash(iconv -f UTF-8 -t CP932 uninstall.bat)",
+      "Bash(mv uninstall_sjis.bat uninstall.bat)",
+      "Bash(cmd /c \"tasklist /m rtry_tsf.dll\")",
+      "Bash(tasklist /m rtry_tsf.dll)",
+      "Bash(tasklist //m rtry_tsf.dll)",
+      "Bash(F:/dev/rtry/uninstall.bat)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ]
+  }
+}

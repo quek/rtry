@@ -1,0 +1,9 @@
+[package]
+name = "rtry-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rtry-core = { path = "../rtry-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
