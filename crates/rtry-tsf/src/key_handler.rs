@@ -281,7 +281,8 @@ impl TryCodeTextService_Impl {
         );
         let session: ITfEditSession = session.into();
         unsafe {
-            let _ = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READ)?;
+            let hr = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READ)?;
+            crate::debug_log!("CharHelp: RequestEditSession returned hr={:?}", hr);
         }
         Ok(())
     }
@@ -325,7 +326,8 @@ impl TryCodeTextService_Impl {
         );
         let session: ITfEditSession = session.into();
         unsafe {
-            let _ = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE)?;
+            let hr = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE)?;
+            crate::debug_log!("MazegakiStart: RequestEditSession returned hr={:?}", hr);
         }
 
         // EditSession 完了後、候補ウィンドウを表示

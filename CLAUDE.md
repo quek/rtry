@@ -83,7 +83,19 @@ uninstall.bat # regsvr32 /u で DLL 登録解除
 - 候補ウィンドウ（Win32ポップアップ、番号選択対応）
 - IME オン/オフトグル（Alt+` / 半角全角）
 
+## 既知の制限
+
+### CUAS環境（Emacs等）でのテキスト読み取り不可
+Emacs等のIMM32ベースアプリでは、CUAS互換レイヤーのテキストストアが書き込み専用のため、
+ストロークヘルプと交ぜ書き変換が動作しない（`ShiftStart`=0, `GetText`=0文字）。
+通常のストローク入力（テキスト書き込みのみ）は正常に動作する。
+
+- **確認済み事実**: Emacsソース（w32fns.c）にTSF/ITextStoreACPの実装なし、`IMR_DOCUMENTFEED`処理もなし
+- **他IMEの対策**: Mozc=TSF→IMR_DOCUMENTFEEDフォールバック、tsf-tutcode=さらに内部バッファフォールバック
+- **対策候補**: CommitEditSessionで出力した文字を内部バッファに記録し、TSF読み取り失敗時に使用（tsf-tutcode方式）
+
 ## 未実装機能
+- CUAS環境向け内部バッファフォールバック
 - 後置型交ぜ書き変換（18-98）
 - 部首合成（`@b`）
 - ヒストリ入力（`@q`）

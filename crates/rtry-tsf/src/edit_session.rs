@@ -217,6 +217,7 @@ impl ITfEditSession_Impl for CharHelpEditSession_Impl {
             let mut fetched = 0u32;
             self.context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut sel, &mut fetched)?;
             if fetched == 0 {
+                crate::debug_log!("CharHelp: GetSelection returned 0 selections");
                 return Ok(());
             }
 
@@ -228,6 +229,7 @@ impl ITfEditSession_Impl for CharHelpEditSession_Impl {
             read_range.Collapse(ec, TF_ANCHOR_START)?;
             let mut actual = 0i32;
             read_range.ShiftStart(ec, -1, &mut actual, std::ptr::null())?;
+            crate::debug_log!("CharHelp: ShiftStart(-1) shifted={}", actual);
 
             // テキストを読み取り
             let mut buf = [0u16; 4]; // UTF-16 で最大2ユニット + 余裕
@@ -235,12 +237,14 @@ impl ITfEditSession_Impl for CharHelpEditSession_Impl {
             read_range.GetText(ec, 0, &mut buf, &mut cch)?;
 
             if cch == 0 {
+                crate::debug_log!("CharHelp: GetText returned 0 chars");
                 return Ok(());
             }
 
             let text = String::from_utf16_lossy(&buf[..cch as usize]);
             let ch = text.trim();
             if ch.is_empty() {
+                crate::debug_log!("CharHelp: text is empty after trim");
                 return Ok(());
             }
 
@@ -298,6 +302,7 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
             let mut fetched = 0u32;
             self.context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut sel, &mut fetched)?;
             if fetched == 0 {
+                crate::debug_log!("MazegakiStart: GetSelection returned 0 selections");
                 return Ok(());
             }
 
@@ -309,11 +314,13 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
             read_range.Collapse(ec, TF_ANCHOR_START)?;
             let mut shifted = 0i32;
             read_range.ShiftStart(ec, -10, &mut shifted, std::ptr::null())?;
+            crate::debug_log!("MazegakiStart: ShiftStart(-10) shifted={}", shifted);
 
             let mut buf = [0u16; 20];
             let mut cch = 0u32;
             read_range.GetText(ec, 0, &mut buf, &mut cch)?;
             if cch == 0 {
+                crate::debug_log!("MazegakiStart: GetText returned 0 chars");
                 return Ok(());
             }
 
