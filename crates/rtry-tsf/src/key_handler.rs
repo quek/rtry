@@ -18,6 +18,15 @@ fn is_alt_pressed() -> bool {
     unsafe { GetKeyState(VK_MENU.0 as i32) < 0 }
 }
 
+/// Ctrl または Shift が押されているか判定
+fn has_modifier_key() -> bool {
+    unsafe {
+        GetKeyState(VK_CONTROL.0 as i32) < 0
+            || GetKeyState(VK_SHIFT.0 as i32) < 0
+            || GetKeyState(VK_MENU.0 as i32) < 0
+    }
+}
+
 /// IMEオン/オフトグルキーか判定 (Alt+` または 半角/全角)
 fn is_toggle_key(wparam: WPARAM) -> bool {
     let vk = wparam.0 as u32;
@@ -76,6 +85,11 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
 
         // IMEオフならパススルー
         if !*self.is_open.borrow() {
+            return Ok(FALSE);
+        }
+
+        // 修飾キー（Ctrl/Shift/Alt）付きはパススルー（C-c, C-v 等）
+        if has_modifier_key() {
             return Ok(FALSE);
         }
 
@@ -164,6 +178,13 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
 
         // IMEオフならパススルー
         if !*self.is_open.borrow() {
+            return Ok(FALSE);
+        }
+
+        // 修飾キー（Ctrl/Shift/Alt）付きはパススルー（C-c, C-v 等）
+        // 注: 一部のアプリ（Windows 11 メモ帳等）は OnTestKeyDown を呼ばず
+        // OnKeyDown を直接呼ぶため、ここでもチェックが必要
+        if has_modifier_key() {
             return Ok(FALSE);
         }
 

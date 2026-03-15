@@ -22,9 +22,10 @@ if exist "%DLL_PATH%" (
     echo [SKIP] DLL not found: %DLL_PATH%
 )
 
-if exist "%APPDATA%\rtry" (
-    rmdir /s /q "%APPDATA%\rtry"
-    echo [OK] Removed %APPDATA%\rtry
+:: ユーザーデータ（try.tbl, mazegaki.dic 等）は保持する
+:: デバッグログのみ削除
+if exist "%APPDATA%\rtry\debug.log" (
+    del "%APPDATA%\rtry\debug.log"
 )
 
 echo.
