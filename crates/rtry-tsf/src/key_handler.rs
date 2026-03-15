@@ -113,11 +113,13 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
     ) -> Result<BOOL> {
         // IMEオン/オフトグル
         if is_toggle_key(wparam) {
-            let mut is_open = self.is_open.borrow_mut();
-            let was_open = *is_open;
-            *is_open = !was_open;
+            let was_open = {
+                let mut is_open = self.is_open.borrow_mut();
+                let was = *is_open;
+                *is_open = !was;
+                was
+            };
             crate::debug_log!("IME toggled: {} -> {}", was_open, !was_open);
-            drop(is_open);
             // オフにするときはエンジンとコンポジションをリセット
             if was_open {
                 if let Some(ref mut engine) = *self.engine.borrow_mut() {
@@ -139,35 +141,37 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
             return self.handle_mazegaki_key(&context, wparam);
         }
 
-        let mut engine_ref = self.engine.borrow_mut();
-        let Some(ref mut engine) = *engine_ref else {
-            return Ok(FALSE);
-        };
-
-        // ペンディング中の非マップキー処理
-        if engine.has_pending_stroke() {
-            let vk = wparam.0 as u32;
-            if vk == VK_BACK.0 as u32 {
-                // BS: ペンディングを破棄（消費）
-                crate::debug_log!("OnKeyDown: BS cancels pending stroke");
-                engine.reset();
-                return Ok(TRUE);
-            }
-            if vk_to_char(wparam).is_none() {
-                // 非マップキー: リセットしてパススルー
-                crate::debug_log!("OnKeyDown: non-mapped key resets pending stroke");
-                engine.reset();
+        let output = {
+            let mut engine_ref = self.engine.borrow_mut();
+            let Some(ref mut engine) = *engine_ref else {
                 return Ok(FALSE);
+            };
+
+            // ペンディング中の非マップキー処理
+            if engine.has_pending_stroke() {
+                let vk = wparam.0 as u32;
+                if vk == VK_BACK.0 as u32 {
+                    // BS: ペンディングを破棄（消費）
+                    crate::debug_log!("OnKeyDown: BS cancels pending stroke");
+                    engine.reset();
+                    return Ok(TRUE);
+                }
+                if vk_to_char(wparam).is_none() {
+                    // 非マップキー: リセットしてパススルー
+                    crate::debug_log!("OnKeyDown: non-mapped key resets pending stroke");
+                    engine.reset();
+                    return Ok(FALSE);
+                }
             }
-        }
 
-        let Some(ch) = vk_to_char(wparam) else {
-            return Ok(FALSE);
+            let Some(ch) = vk_to_char(wparam) else {
+                return Ok(FALSE);
+            };
+
+            let output = engine.process_key(ch);
+            crate::debug_log!("OnKeyDown: ch='{}' output={:?}", ch, output);
+            output
         };
-
-        let output = engine.process_key(ch);
-        crate::debug_log!("OnKeyDown: ch='{}' output={:?}", ch, output);
-        drop(engine_ref);
 
         match output {
             EngineOutput::Commit(text) => {
@@ -263,12 +267,13 @@ impl TryCodeTextService_Impl {
     /// ストロークヘルプを表示する
     fn do_char_help(&self, context: &ITfContext) -> Result<()> {
         let tid = *self.client_id.borrow();
-        let engine_ref = self.engine.borrow();
-        let Some(ref engine) = *engine_ref else {
-            return Ok(());
+        let table = {
+            let engine_ref = self.engine.borrow();
+            let Some(ref engine) = *engine_ref else {
+                return Ok(());
+            };
+            engine.table()
         };
-        let table = engine.table();
-        drop(engine_ref);
 
         let session = edit_session::CharHelpEditSession::new(
             context.clone(),
@@ -298,13 +303,14 @@ impl TryCodeTextService_Impl {
 
     /// 交ぜ書き変換を開始する
     fn do_mazegaki_start(&self, context: &ITfContext) -> Result<()> {
-        let dict_ref = self.mazegaki_dict.borrow();
-        let Some(ref dict) = *dict_ref else {
-            crate::debug_log!("Mazegaki: no dictionary loaded");
-            return Ok(());
+        let dict = {
+            let dict_ref = self.mazegaki_dict.borrow();
+            let Some(ref dict) = *dict_ref else {
+                crate::debug_log!("Mazegaki: no dictionary loaded");
+                return Ok(());
+            };
+            dict.clone()
         };
-        let dict = dict.clone();
-        drop(dict_ref);
 
         let tid = *self.client_id.borrow();
         let this_unknown: IUnknown = self.to_interface();
@@ -367,13 +373,14 @@ impl TryCodeTextService_Impl {
             // 1-9: 番号選択で確定
             0x31..=0x39 => {
                 let index = (vk - 0x31) as usize;
-                let mut state = self.mazegaki_state.lock().unwrap();
-                if let Some(ref mut state) = *state {
-                    if index < state.candidates.len() {
-                        state.selected = index;
+                {
+                    let mut guard = self.mazegaki_state.lock().unwrap();
+                    if let Some(ref mut state) = *guard {
+                        if index < state.candidates.len() {
+                            state.selected = index;
+                        }
                     }
                 }
-                drop(state);
                 self.do_mazegaki_commit(context)?;
                 Ok(TRUE)
             }
@@ -416,12 +423,13 @@ impl TryCodeTextService_Impl {
 
     /// 交ぜ書き確定後にストロークヘルプを表示
     fn show_mazegaki_stroke_help(&self, text: &str) {
-        let engine_ref = self.engine.borrow();
-        let Some(ref engine) = *engine_ref else {
-            return;
+        let table = {
+            let engine_ref = self.engine.borrow();
+            let Some(ref engine) = *engine_ref else {
+                return;
+            };
+            engine.table()
         };
-        let table = engine.table();
-        drop(engine_ref);
 
         let mut parts = Vec::new();
         for ch in text.chars() {

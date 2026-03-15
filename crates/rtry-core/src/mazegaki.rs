@@ -80,8 +80,8 @@ impl MazegakiDictionary {
 
     /// テキスト末尾から最長一致検索
     ///
-    /// 戻り値: (読みの文字数, 読み, 候補リスト)
-    pub fn find_longest_match(&self, text: &str) -> Option<(usize, String, Vec<String>)> {
+    /// 戻り値: (読みの文字数, 読み, 候補リストの参照)
+    pub fn find_longest_match(&self, text: &str) -> Option<(usize, String, &[String])> {
         let chars: Vec<char> = text.chars().collect();
         let max_len = chars.len().min(self.max_reading_len);
 
@@ -89,7 +89,7 @@ impl MazegakiDictionary {
         for len in (1..=max_len).rev() {
             let reading: String = chars[chars.len() - len..].iter().collect();
             if let Some(candidates) = self.entries.get(&reading) {
-                return Some((len, reading, candidates.clone()));
+                return Some((len, reading, candidates));
             }
         }
         None

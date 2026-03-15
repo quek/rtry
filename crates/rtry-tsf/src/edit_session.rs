@@ -18,6 +18,23 @@ use rtry_core::table::TryCodeTable;
 use crate::composition::SharedComposition;
 use crate::text_service::MazegakiState;
 
+/// カーソルをレンジ末尾に移動するセレクションを設定
+unsafe fn set_cursor_to_end(context: &ITfContext, ec: u32, range: &ITfRange) -> Result<()> {
+    unsafe {
+        let sel_range = range.Clone()?;
+        sel_range.Collapse(ec, TF_ANCHOR_END)?;
+        let selection = TF_SELECTION {
+            range: std::mem::ManuallyDrop::new(Some(sel_range)),
+            style: TF_SELECTIONSTYLE {
+                ase: TF_AE_NONE,
+                fInterimChar: false.into(),
+            },
+        };
+        let _ = context.SetSelection(ec, &[selection]);
+    }
+    Ok(())
+}
+
 /// 文字列確定用のエディットセッション
 #[implement(ITfEditSession)]
 pub struct CommitEditSession {
@@ -68,16 +85,7 @@ impl ITfEditSession_Impl for CommitEditSession_Impl {
             let text_w: Vec<u16> = self.text.encode_utf16().collect();
             range.SetText(ec, TF_ST_CORRECTION, &text_w)?;
             // カーソルをテキスト末尾に移動
-            let sel_range = range.Clone()?;
-            sel_range.Collapse(ec, TF_ANCHOR_END)?;
-            let selection = TF_SELECTION {
-                range: std::mem::ManuallyDrop::new(Some(sel_range)),
-                style: TF_SELECTIONSTYLE {
-                    ase: TF_AE_NONE,
-                    fInterimChar: false.into(),
-                },
-            };
-            let _ = self.context.SetSelection(ec, &[selection]);
+            set_cursor_to_end(&self.context, ec, &range)?;
             let _ = composition.EndComposition(ec);
         }
         crate::debug_log!("CommitEditSession: committed '{}'", self.text);
@@ -118,7 +126,7 @@ impl ITfEditSession_Impl for ComposingEditSession_Impl {
                 let range = composition.GetRange()?;
                 let text_w: Vec<u16> = self.text.encode_utf16().collect();
                 range.SetText(ec, TF_ST_CORRECTION, &text_w)?;
-                log::debug!("ComposingEditSession: updated to '{}'", self.text);
+                crate::debug_log!("ComposingEditSession: updated to '{}'", self.text);
             } else {
                 // 新しいコンポジションを開始
                 let insert_at_sel: ITfInsertAtSelection = self.context.cast()?;
@@ -141,16 +149,7 @@ impl ITfEditSession_Impl for ComposingEditSession_Impl {
                 comp_range.SetText(ec, TF_ST_CORRECTION, &text_w)?;
 
                 // カーソルをコンポジション末尾に移動
-                let sel_range = comp_range.Clone()?;
-                sel_range.Collapse(ec, TF_ANCHOR_END)?;
-                let selection = TF_SELECTION {
-                    range: std::mem::ManuallyDrop::new(Some(sel_range)),
-                    style: TF_SELECTIONSTYLE {
-                        ase: TF_AE_NONE,
-                        fInterimChar: false.into(),
-                    },
-                };
-                let _ = self.context.SetSelection(ec, &[selection]);
+                set_cursor_to_end(&self.context, ec, &comp_range)?;
 
                 // SharedCompositionに保存 → 次回のEditSessionで参照可能
                 self.shared_comp.set(composition);
@@ -187,7 +186,7 @@ impl ITfEditSession_Impl for EndCompositionEditSession_Impl {
                 let range = composition.GetRange()?;
                 range.SetText(ec, TF_ST_CORRECTION, &[])?;
                 let _ = composition.EndComposition(ec);
-                log::debug!("EndCompositionEditSession: ended composition");
+                crate::debug_log!("EndCompositionEditSession: ended composition");
             }
         }
         Ok(())
@@ -348,16 +347,7 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
             comp_range2.SetText(ec, TF_ST_CORRECTION, &text_w)?;
 
             // カーソルをコンポジション末尾に移動
-            let sel_range = comp_range2.Clone()?;
-            sel_range.Collapse(ec, TF_ANCHOR_END)?;
-            let selection = TF_SELECTION {
-                range: std::mem::ManuallyDrop::new(Some(sel_range)),
-                style: TF_SELECTIONSTYLE {
-                    ase: TF_AE_NONE,
-                    fInterimChar: false.into(),
-                },
-            };
-            let _ = self.context.SetSelection(ec, &[selection]);
+            set_cursor_to_end(&self.context, ec, &comp_range2)?;
 
             // SharedComposition にセット
             self.shared_comp.set(composition);
@@ -365,7 +355,7 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
             // MazegakiState を結果スロットにセット
             let state = MazegakiState {
                 reading,
-                candidates,
+                candidates: candidates.to_vec(),
                 selected: 0,
             };
             *self.result_slot.lock().unwrap() = Some(state);
@@ -400,16 +390,7 @@ impl ITfEditSession_Impl for MazegakiUpdateEditSession_Impl {
                 let text_w: Vec<u16> = self.text.encode_utf16().collect();
                 range.SetText(ec, TF_ST_CORRECTION, &text_w)?;
 
-                let sel_range = range.Clone()?;
-                sel_range.Collapse(ec, TF_ANCHOR_END)?;
-                let selection = TF_SELECTION {
-                    range: std::mem::ManuallyDrop::new(Some(sel_range)),
-                    style: TF_SELECTIONSTYLE {
-                        ase: TF_AE_NONE,
-                        fInterimChar: false.into(),
-                    },
-                };
-                let _ = self.context.SetSelection(ec, &[selection]);
+                set_cursor_to_end(&self.context, ec, &range)?;
 
                 crate::debug_log!("MazegakiUpdate: updated to '{}'", self.text);
             }

@@ -6,7 +6,7 @@ use crate::history::HistoryManager;
 use crate::table::{SpecialFunction, TableEntry, TryCodeTable};
 
 /// 入力エンジンの状態
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EngineState {
     /// 初期状態 (待機中)
     Idle,
@@ -66,7 +66,9 @@ impl Engine {
 
     /// キー入力を処理
     pub fn process_key(&mut self, key: char) -> EngineOutput {
-        match self.state.clone() {
+        // Copy で十分な小さい enum なので clone 不要
+        let state = self.state;
+        match state {
             EngineState::Idle => self.handle_idle(key),
             EngineState::FirstStroke(first) => self.handle_second_stroke(first, key),
             EngineState::PrefixStroke => self.handle_ext_first_stroke(key),
@@ -130,19 +132,19 @@ impl Engine {
             };
         };
 
-        self.resolve_2stroke(first, second)
+        let entry = self.table.lookup_2stroke(first, second).cloned();
+        self.resolve_entry(entry)
     }
 
-    /// 2打鍵テーブルのルックアップと結果処理
-    fn resolve_2stroke(&mut self, first: usize, second: usize) -> EngineOutput {
-        match self.table.lookup_2stroke(first, second) {
+    /// テーブルエントリの結果処理（2打鍵・3打鍵共通）
+    fn resolve_entry(&mut self, entry: Option<TableEntry>) -> EngineOutput {
+        match entry {
             Some(TableEntry::Char(s)) => {
-                let s = s.clone();
                 self.history.push(s.clone());
                 EngineOutput::Commit(s)
             }
             Some(TableEntry::Special(func)) => {
-                self.handle_special_function(func.clone())
+                self.handle_special_function(func)
             }
             _ => EngineOutput::Clear,
         }
@@ -171,17 +173,8 @@ impl Engine {
             return EngineOutput::Clear;
         };
 
-        match self.table.lookup_3stroke(first, second) {
-            Some(TableEntry::Char(s)) => {
-                let s = s.clone();
-                self.history.push(s.clone());
-                EngineOutput::Commit(s)
-            }
-            Some(TableEntry::Special(func)) => {
-                self.handle_special_function(func.clone())
-            }
-            _ => EngineOutput::Clear,
-        }
+        let entry = self.table.lookup_3stroke(first, second).cloned();
+        self.resolve_entry(entry)
     }
 
     /// 特殊機能の処理
