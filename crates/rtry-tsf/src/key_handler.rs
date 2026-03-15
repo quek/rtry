@@ -379,8 +379,37 @@ impl TryCodeTextService_Impl {
         if let Some(state) = state {
             let text = state.candidates[state.selected].clone();
             self.do_commit(context, &text)?;
+            self.show_mazegaki_stroke_help(&text);
         }
         Ok(())
+    }
+
+    /// 交ぜ書き確定後にストロークヘルプを表示
+    fn show_mazegaki_stroke_help(&self, text: &str) {
+        let engine_ref = self.engine.borrow();
+        let Some(ref engine) = *engine_ref else {
+            return;
+        };
+        let table = engine.table();
+        drop(engine_ref);
+
+        let mut parts = Vec::new();
+        for ch in text.chars() {
+            let s = ch.to_string();
+            let strokes = table.reverse_lookup(&s);
+            if strokes.is_empty() {
+                parts.push(format!("{}:?", ch));
+            } else {
+                let stroke_strs: Vec<String> = strokes.iter()
+                    .map(|s| s.to_display_string())
+                    .collect();
+                parts.push(format!("{}:{}", ch, stroke_strs.join("/")));
+            }
+        }
+        if !parts.is_empty() {
+            let msg = parts.join("  ");
+            crate::stroke_help::show_stroke_help(&msg);
+        }
     }
 
     /// 交ぜ書き変換をキャンセル（元の読みに戻す）
