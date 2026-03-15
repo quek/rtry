@@ -95,7 +95,7 @@ impl TryCodeTextService {
             client_id: RefCell::new(0),
             engine: RefCell::new(None),
             composition: SharedComposition::new(),
-            is_open: RefCell::new(true),
+            is_open: RefCell::new(false),
             langbar_button: RefCell::new(None),
             mazegaki_state: Arc::new(Mutex::new(None)),
             mazegaki_dict: RefCell::new(None),
