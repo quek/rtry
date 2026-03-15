@@ -226,6 +226,7 @@ impl ITfTextInputProcessor_Impl for TryCodeTextService_Impl {
         self.composition.clear();
         *self.mazegaki_state.lock().unwrap() = None;
         crate::candidate_window::dismiss();
+        crate::ime_indicator::dismiss();
 
         // 言語バーボタンの削除
         if let Some(ref thread_mgr) = *self.thread_mgr.borrow() {

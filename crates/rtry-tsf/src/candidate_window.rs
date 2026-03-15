@@ -52,7 +52,7 @@ pub fn show_candidates(candidates: &[String], selected: usize) {
     unsafe {
         ensure_class_registered();
 
-        let (x, y) = crate::stroke_help::get_caret_screen_pos();
+        let (x, y) = crate::caret_rect::last_caret_pos();
 
         let count = candidates.len().min(9) as i32;
         let width = calc_max_width(candidates) + PADDING_X * 2 + 40;
@@ -64,7 +64,7 @@ pub fn show_candidates(candidates: &[String], selected: usize) {
             w!(""),
             WS_POPUP | WS_BORDER,
             x,
-            y + 20,
+            y,
             width,
             height,
             None,

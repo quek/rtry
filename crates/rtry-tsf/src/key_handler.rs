@@ -172,6 +172,9 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                     engine.reset();
                 }
                 self.postbuf.lock().unwrap().clear();
+                crate::ime_indicator::dismiss();
+            } else {
+                crate::ime_indicator::show();
             }
             return Ok(TRUE);
         }
@@ -187,6 +190,8 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
         if has_modifier_key() {
             return Ok(FALSE);
         }
+
+        crate::ime_indicator::update_position();
 
         let context = pic.clone().ok_or_else(|| Error::from_hresult(E_INVALIDARG))?;
 

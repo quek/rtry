@@ -7,8 +7,10 @@ mod edit_session;
 mod composition;
 mod language_bar;
 mod register;
+mod caret_rect;
 mod stroke_help;
 mod candidate_window;
+mod ime_indicator;
 
 /// デバッグログのパスを決定（%TEMP%\rtry_debug.log）
 /// Mozc (glog) と同様に %TEMP% を使用。通常プロセス・AppContainer 両方から書き込み可能

@@ -80,6 +80,7 @@ use crate::text_service::postbuf_append;
 
 impl ITfEditSession_Impl for CommitEditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
+        crate::caret_rect::update_caret_rect(ec, &self.context);
         unsafe {
             let composition = if let Some(comp) = self.shared_comp.take() {
                 comp
@@ -140,6 +141,7 @@ impl ComposingEditSession {
 
 impl ITfEditSession_Impl for ComposingEditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
+        crate::caret_rect::update_caret_rect(ec, &self.context);
         unsafe {
             if let Some(composition) = self.shared_comp.get() {
                 // 既存のコンポジションを更新
@@ -184,7 +186,7 @@ impl ITfEditSession_Impl for ComposingEditSession_Impl {
 /// コンポジション終了用のエディットセッション
 #[implement(ITfEditSession)]
 pub struct EndCompositionEditSession {
-    _context: ITfContext,
+    context: ITfContext,
     _client_id: u32,
     shared_comp: SharedComposition,
 }
@@ -195,12 +197,13 @@ impl EndCompositionEditSession {
         client_id: u32,
         shared_comp: SharedComposition,
     ) -> Self {
-        EndCompositionEditSession { _context: context, _client_id: client_id, shared_comp }
+        EndCompositionEditSession { context, _client_id: client_id, shared_comp }
     }
 }
 
 impl ITfEditSession_Impl for EndCompositionEditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
+        crate::caret_rect::update_caret_rect(ec, &self.context);
         unsafe {
             if let Some(composition) = self.shared_comp.take() {
                 let range = composition.GetRange()?;
@@ -232,6 +235,7 @@ impl CharHelpEditSession {
 
 impl ITfEditSession_Impl for CharHelpEditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
+        crate::caret_rect::update_caret_rect(ec, &self.context);
         unsafe {
             // カーソル位置を取得
             let Some(range) = get_selection_range(&self.context, ec)? else {
@@ -323,6 +327,7 @@ impl MazegakiStartEditSession {
 
 impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
+        crate::caret_rect::update_caret_rect(ec, &self.context);
         unsafe {
             // カーソル位置を取得
             let Some(range) = get_selection_range(&self.context, ec)? else {
@@ -423,6 +428,7 @@ impl MazegakiUpdateEditSession {
 
 impl ITfEditSession_Impl for MazegakiUpdateEditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
+        crate::caret_rect::update_caret_rect(ec, &self.context);
         unsafe {
             if let Some(composition) = self.shared_comp.get() {
                 let range = composition.GetRange()?;

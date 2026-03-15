@@ -25,7 +25,7 @@ pub fn show_stroke_help(text: &str) {
     unsafe {
         ensure_class_registered();
 
-        let (x, y) = get_caret_screen_pos();
+        let (x, y) = crate::caret_rect::last_caret_pos();
 
         // テキストサイズを計測
         let hdc = GetDC(None);
@@ -43,7 +43,7 @@ pub fn show_stroke_help(text: &str) {
             PCWSTR(text_w.as_ptr()),
             WS_POPUP | WS_BORDER,
             x,
-            y + 20,
+            y + 2,
             width,
             height,
             None,
@@ -68,20 +68,6 @@ pub fn dismiss() {
         unsafe {
             let _ = DestroyWindow(HWND(raw as *mut _));
         }
-    }
-}
-
-/// カーソルのスクリーン座標を取得
-pub(crate) unsafe fn get_caret_screen_pos() -> (i32, i32) {
-    unsafe {
-        let mut pt = POINT::default();
-        if GetCaretPos(&mut pt).is_ok() {
-            let fg = GetForegroundWindow();
-            if !fg.is_invalid() {
-                let _ = ClientToScreen(fg, &mut pt);
-            }
-        }
-        (pt.x, pt.y)
     }
 }
 
