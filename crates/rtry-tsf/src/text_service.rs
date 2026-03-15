@@ -19,10 +19,59 @@ pub(crate) struct MazegakiState {
     pub candidates: Vec<String>,
     pub selected: usize,
     pub reading: String,
+    /// CUAS環境でpostbufから読みを取得した場合の読み文字数（バックスペースで削除する）
+    pub postbuf_reading_len: Option<usize>,
 }
 
 /// 交ぜ書き変換状態の共有スロット（EditSession から設定される）
 pub(crate) type SharedMazegakiState = Arc<Mutex<Option<MazegakiState>>>;
+
+/// CUAS環境向けの遅延置換状態（VKBackBasedDeleter パターン）
+///
+/// SendInput で N+1 個の VK_BACK を送信し、最初の N 個はアプリに渡して
+/// 読みを削除、最後の番兵をIMEが消費して置換テキストを確定する。
+/// TSFコールバックは同一スレッドで直列処理されるため順序が保証される。
+pub(crate) struct PendingReplace {
+    /// アプリに渡す残りの VK_BACK 数
+    pub remaining_bs: usize,
+    /// 番兵到達時に確定するテキスト
+    pub text: String,
+}
+
+/// 確定済みテキストの内部バッファ（CUAS環境フォールバック用）
+pub(crate) type SharedPostBuf = Arc<Mutex<String>>;
+
+const MAX_POSTBUF_CHARS: usize = 10;
+
+/// postbuf にテキストを追記し、最大文字数に制限する
+pub(crate) fn postbuf_append(postbuf: &SharedPostBuf, text: &str) {
+    let mut buf = postbuf.lock().unwrap();
+    buf.push_str(text);
+    truncate_front(&mut buf, MAX_POSTBUF_CHARS);
+}
+
+/// postbuf の末尾から指定文字数を削除する
+pub(crate) fn postbuf_remove_tail(postbuf: &SharedPostBuf, char_count: usize) {
+    let mut buf = postbuf.lock().unwrap();
+    let total = buf.chars().count();
+    if char_count >= total {
+        buf.clear();
+    } else {
+        let keep = total - char_count;
+        let byte_offset = buf.char_indices().nth(keep).map_or(buf.len(), |(i, _)| i);
+        buf.truncate(byte_offset);
+    }
+}
+
+/// 文字列の先頭を切り詰めて最大 max_chars 文字にする
+fn truncate_front(s: &mut String, max_chars: usize) {
+    let char_count = s.chars().count();
+    if char_count > max_chars {
+        let drop_count = char_count - max_chars;
+        let byte_offset = s.char_indices().nth(drop_count).map_or(s.len(), |(i, _)| i);
+        s.drain(..byte_offset);
+    }
+}
 
 #[implement(ITfTextInputProcessor, ITfKeyEventSink, ITfCompositionSink)]
 pub struct TryCodeTextService {
@@ -34,6 +83,8 @@ pub struct TryCodeTextService {
     langbar_button: RefCell<Option<ITfLangBarItemButton>>,
     pub(crate) mazegaki_state: SharedMazegakiState,
     pub(crate) mazegaki_dict: RefCell<Option<Arc<MazegakiDictionary>>>,
+    pub(crate) postbuf: SharedPostBuf,
+    pub(crate) pending_replace: RefCell<Option<PendingReplace>>,
 }
 
 impl TryCodeTextService {
@@ -48,6 +99,8 @@ impl TryCodeTextService {
             langbar_button: RefCell::new(None),
             mazegaki_state: Arc::new(Mutex::new(None)),
             mazegaki_dict: RefCell::new(None),
+            postbuf: Arc::new(Mutex::new(String::new())),
+            pending_replace: RefCell::new(None),
         }
     }
 

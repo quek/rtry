@@ -41,6 +41,23 @@ fn vk_to_char(wparam: WPARAM) -> Option<char> {
     }
 }
 
+/// キーの押下・解放の INPUT ペアを生成する
+fn make_key_input_pair(vk: VIRTUAL_KEY) -> [INPUT; 2] {
+    let ki = |flags| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    [ki(Default::default()), ki(KEYEVENTF_KEYUP)]
+}
+
 impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
     fn OnSetFocus(&self, _fforeground: BOOL) -> Result<()> {
         Ok(())
@@ -60,6 +77,21 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
         // IMEオフならパススルー
         if !*self.is_open.borrow() {
             return Ok(FALSE);
+        }
+
+        // CUAS遅延置換中の VK_BACK 処理
+        if wparam.0 as u32 == VK_BACK.0 as u32 {
+            let mut pending = self.pending_replace.borrow_mut();
+            if let Some(ref mut p) = *pending {
+                if p.remaining_bs > 0 {
+                    // 読み削除用: アプリに渡す
+                    p.remaining_bs -= 1;
+                    return Ok(FALSE);
+                } else {
+                    // 番兵: IMEが消費して置換テキストを確定
+                    return Ok(TRUE);
+                }
+            }
         }
 
         // 交ぜ書き変換中は全キー消費
@@ -125,6 +157,7 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                 if let Some(ref mut engine) = *self.engine.borrow_mut() {
                     engine.reset();
                 }
+                self.postbuf.lock().unwrap().clear();
             }
             return Ok(TRUE);
         }
@@ -135,6 +168,16 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
         }
 
         let context = pic.clone().ok_or_else(|| Error::from_hresult(E_INVALIDARG))?;
+
+        // CUAS遅延置換: 番兵 VK_BACK が到着 → 置換テキストを確定
+        if wparam.0 as u32 == VK_BACK.0 as u32 {
+            let pending = self.pending_replace.borrow_mut().take();
+            if let Some(p) = pending {
+                crate::debug_log!("PendingReplace: sentinel arrived, committing '{}'", p.text);
+                self.do_commit(&context, &p.text)?;
+                return Ok(TRUE);
+            }
+        }
 
         // 交ぜ書き変換中のキー処理
         if self.mazegaki_state.lock().unwrap().is_some() {
@@ -235,6 +278,7 @@ impl TryCodeTextService_Impl {
             tid,
             self.composition.clone(),
             comp_sink,
+            self.postbuf.clone(),
         );
         let session: ITfEditSession = session.into();
         unsafe {
@@ -278,6 +322,7 @@ impl TryCodeTextService_Impl {
         let session = edit_session::CharHelpEditSession::new(
             context.clone(),
             table,
+            self.postbuf.clone(),
         );
         let session: ITfEditSession = session.into();
         unsafe {
@@ -323,6 +368,7 @@ impl TryCodeTextService_Impl {
             comp_sink,
             dict,
             self.mazegaki_state.clone(),
+            self.postbuf.clone(),
         );
         let session: ITfEditSession = session.into();
         unsafe {
@@ -346,7 +392,7 @@ impl TryCodeTextService_Impl {
         match vk {
             // Space: 次候補
             0x20 => {
-                let (text, selected, candidates) = {
+                let (text, selected, candidates, is_postbuf) = {
                     let mut guard = self.mazegaki_state.lock().unwrap();
                     let Some(ref mut state) = *guard else {
                         return Ok(TRUE);
@@ -356,9 +402,12 @@ impl TryCodeTextService_Impl {
                         state.candidates[state.selected].clone(),
                         state.selected,
                         state.candidates.clone(),
+                        state.postbuf_reading_len.is_some(),
                     )
                 };
-                self.do_mazegaki_update(context, &text)?;
+                if !is_postbuf {
+                    self.do_mazegaki_update(context, &text)?;
+                }
                 crate::candidate_window::show_candidates(&candidates, selected);
                 Ok(TRUE)
             }
@@ -417,10 +466,40 @@ impl TryCodeTextService_Impl {
 
         if let Some(state) = state {
             let text = state.candidates[state.selected].clone();
-            self.do_commit(context, &text)?;
+            if let Some(reading_len) = state.postbuf_reading_len {
+                // CUAS環境: VKBackBasedDeleter パターン（tsf-tutcode/Mozc 由来）
+                // N+1 個の VK_BACK を SendInput で送信:
+                //   最初の N 個 → OnTestKeyDown で FALSE を返しアプリに渡す（読み削除）
+                //   最後の 1 個（番兵） → OnTestKeyDown で TRUE → OnKeyDown で do_commit
+                // TSFコールバックは同一スレッドで直列処理されるため順序保証される
+                crate::text_service::postbuf_remove_tail(&self.postbuf, reading_len);
+                *self.pending_replace.borrow_mut() = Some(
+                    crate::text_service::PendingReplace {
+                        remaining_bs: reading_len,
+                        text: text.clone(),
+                    },
+                );
+                self.send_backspaces(reading_len + 1); // +1 = 番兵
+                crate::debug_log!(
+                    "MazegakiCommit(postbuf): queued {} BS + sentinel for '{}'",
+                    reading_len, text
+                );
+            } else {
+                self.do_commit(context, &text)?;
+            }
             self.show_mazegaki_stroke_help(&text);
         }
         Ok(())
+    }
+
+    /// SendInput で VK_BACK を送信する
+    fn send_backspaces(&self, count: usize) {
+        let inputs: Vec<INPUT> = (0..count)
+            .flat_map(|_| make_key_input_pair(VK_BACK))
+            .collect();
+        unsafe {
+            SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        }
     }
 
     /// 交ぜ書き確定後にストロークヘルプを表示
@@ -458,8 +537,13 @@ impl TryCodeTextService_Impl {
         crate::candidate_window::dismiss();
 
         if let Some(state) = state {
-            // 元の読みで確定（元に戻す）
-            self.do_commit(context, &state.reading)?;
+            if state.postbuf_reading_len.is_some() {
+                // CUAS環境: コンポジションを作っていないので何もしない
+                crate::debug_log!("MazegakiCancel(postbuf): cancelled, reading unchanged");
+            } else {
+                // 通常環境: 元の読みで確定（元に戻す）
+                self.do_commit(context, &state.reading)?;
+            }
         }
         Ok(())
     }

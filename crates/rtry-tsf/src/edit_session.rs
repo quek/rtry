@@ -16,7 +16,7 @@ use rtry_core::mazegaki::MazegakiDictionary;
 use rtry_core::table::TryCodeTable;
 
 use crate::composition::SharedComposition;
-use crate::text_service::MazegakiState;
+use crate::text_service::{MazegakiState, SharedPostBuf};
 
 /// カーソルをレンジ末尾に移動するセレクションを設定
 unsafe fn set_cursor_to_end(context: &ITfContext, ec: u32, range: &ITfRange) -> Result<()> {
@@ -35,6 +35,21 @@ unsafe fn set_cursor_to_end(context: &ITfContext, ec: u32, range: &ITfRange) -> 
     Ok(())
 }
 
+/// GetSelection でカーソル位置の ITfRange を取得する
+unsafe fn get_selection_range(context: &ITfContext, ec: u32) -> Result<Option<ITfRange>> {
+    unsafe {
+        let mut sel = [TF_SELECTION::default()];
+        let mut fetched = 0u32;
+        context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut sel, &mut fetched)?;
+        if fetched == 0 {
+            return Ok(None);
+        }
+        let range = std::mem::ManuallyDrop::into_inner(sel[0].range.clone())
+            .ok_or_else(|| Error::from_hresult(E_FAIL))?;
+        Ok(Some(range))
+    }
+}
+
 /// 文字列確定用のエディットセッション
 #[implement(ITfEditSession)]
 pub struct CommitEditSession {
@@ -43,6 +58,7 @@ pub struct CommitEditSession {
     _client_id: u32,
     shared_comp: SharedComposition,
     composition_sink: ITfCompositionSink,
+    postbuf: SharedPostBuf,
 }
 
 impl CommitEditSession {
@@ -52,12 +68,15 @@ impl CommitEditSession {
         client_id: u32,
         shared_comp: SharedComposition,
         composition_sink: ITfCompositionSink,
+        postbuf: SharedPostBuf,
     ) -> Self {
         CommitEditSession {
-            context, text, _client_id: client_id, shared_comp, composition_sink,
+            context, text, _client_id: client_id, shared_comp, composition_sink, postbuf,
         }
     }
 }
+
+use crate::text_service::postbuf_append;
 
 impl ITfEditSession_Impl for CommitEditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
@@ -89,6 +108,7 @@ impl ITfEditSession_Impl for CommitEditSession_Impl {
             let _ = composition.EndComposition(ec);
         }
         crate::debug_log!("CommitEditSession: committed '{}'", self.text);
+        postbuf_append(&self.postbuf, &self.text);
         Ok(())
     }
 }
@@ -201,11 +221,12 @@ impl ITfEditSession_Impl for EndCompositionEditSession_Impl {
 pub struct CharHelpEditSession {
     context: ITfContext,
     table: Arc<TryCodeTable>,
+    postbuf: SharedPostBuf,
 }
 
 impl CharHelpEditSession {
-    pub fn new(context: ITfContext, table: Arc<TryCodeTable>) -> Self {
-        CharHelpEditSession { context, table }
+    pub fn new(context: ITfContext, table: Arc<TryCodeTable>, postbuf: SharedPostBuf) -> Self {
+        CharHelpEditSession { context, table, postbuf }
     }
 }
 
@@ -213,16 +234,10 @@ impl ITfEditSession_Impl for CharHelpEditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
         unsafe {
             // カーソル位置を取得
-            let mut sel = [TF_SELECTION::default()];
-            let mut fetched = 0u32;
-            self.context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut sel, &mut fetched)?;
-            if fetched == 0 {
+            let Some(range) = get_selection_range(&self.context, ec)? else {
                 crate::debug_log!("CharHelp: GetSelection returned 0 selections");
                 return Ok(());
-            }
-
-            let range = std::mem::ManuallyDrop::into_inner(sel[0].range.clone())
-                .ok_or_else(|| Error::from_hresult(E_FAIL))?;
+            };
 
             // カーソル位置を起点にレンジを作成（1文字前に拡張）
             let read_range = range.Clone()?;
@@ -236,13 +251,23 @@ impl ITfEditSession_Impl for CharHelpEditSession_Impl {
             let mut cch = 0u32;
             read_range.GetText(ec, 0, &mut buf, &mut cch)?;
 
-            if cch == 0 {
-                crate::debug_log!("CharHelp: GetText returned 0 chars");
-                return Ok(());
+            let ch_string;
+            let ch;
+            if cch > 0 {
+                ch_string = String::from_utf16_lossy(&buf[..cch as usize]);
+                ch = ch_string.trim();
+            } else {
+                // CUAS環境フォールバック: postbuf の末尾1文字を使用
+                let buf_content = self.postbuf.lock().unwrap();
+                if let Some(last_char) = buf_content.chars().next_back() {
+                    crate::debug_log!("CharHelp: TSF read failed, using postbuf fallback '{}'", last_char);
+                    ch_string = last_char.to_string();
+                    ch = &ch_string;
+                } else {
+                    crate::debug_log!("CharHelp: GetText returned 0 chars, postbuf empty");
+                    return Ok(());
+                }
             }
-
-            let text = String::from_utf16_lossy(&buf[..cch as usize]);
-            let ch = text.trim();
             if ch.is_empty() {
                 crate::debug_log!("CharHelp: text is empty after trim");
                 return Ok(());
@@ -278,6 +303,7 @@ pub struct MazegakiStartEditSession {
     composition_sink: ITfCompositionSink,
     dict: Arc<MazegakiDictionary>,
     result_slot: Arc<Mutex<Option<MazegakiState>>>,
+    postbuf: SharedPostBuf,
 }
 
 impl MazegakiStartEditSession {
@@ -287,9 +313,10 @@ impl MazegakiStartEditSession {
         composition_sink: ITfCompositionSink,
         dict: Arc<MazegakiDictionary>,
         result_slot: Arc<Mutex<Option<MazegakiState>>>,
+        postbuf: SharedPostBuf,
     ) -> Self {
         MazegakiStartEditSession {
-            context, shared_comp, composition_sink, dict, result_slot,
+            context, shared_comp, composition_sink, dict, result_slot, postbuf,
         }
     }
 }
@@ -298,16 +325,10 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
     fn DoEditSession(&self, ec: u32) -> Result<()> {
         unsafe {
             // カーソル位置を取得
-            let mut sel = [TF_SELECTION::default()];
-            let mut fetched = 0u32;
-            self.context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut sel, &mut fetched)?;
-            if fetched == 0 {
+            let Some(range) = get_selection_range(&self.context, ec)? else {
                 crate::debug_log!("MazegakiStart: GetSelection returned 0 selections");
                 return Ok(());
-            }
-
-            let range = std::mem::ManuallyDrop::into_inner(sel[0].range.clone())
-                .ok_or_else(|| Error::from_hresult(E_FAIL))?;
+            };
 
             // カーソル前の最大10文字を読み取り
             let read_range = range.Clone()?;
@@ -319,13 +340,24 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
             let mut buf = [0u16; 20];
             let mut cch = 0u32;
             read_range.GetText(ec, 0, &mut buf, &mut cch)?;
-            if cch == 0 {
-                crate::debug_log!("MazegakiStart: GetText returned 0 chars");
-                return Ok(());
-            }
 
-            let text = String::from_utf16_lossy(&buf[..cch as usize]);
-            crate::debug_log!("MazegakiStart: text before cursor = '{}'", text);
+            let text;
+            let use_postbuf;
+            if cch > 0 {
+                text = String::from_utf16_lossy(&buf[..cch as usize]);
+                use_postbuf = false;
+                crate::debug_log!("MazegakiStart: text before cursor = '{}'", text);
+            } else {
+                // CUAS環境フォールバック: postbuf の内容を使用
+                let buf_content = self.postbuf.lock().unwrap();
+                if buf_content.is_empty() {
+                    crate::debug_log!("MazegakiStart: GetText returned 0 chars, postbuf empty");
+                    return Ok(());
+                }
+                text = buf_content.clone();
+                use_postbuf = true;
+                crate::debug_log!("MazegakiStart: TSF read failed, using postbuf fallback '{}'", text);
+            }
 
             // 最長一致検索
             let Some((reading_len, reading, candidates)) = self.dict.find_longest_match(&text) else {
@@ -335,35 +367,35 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
             crate::debug_log!("MazegakiStart: matched '{}' ({} chars), {} candidates",
                 reading, reading_len, candidates.len());
 
-            // 読みの範囲にコンポジションを開始
-            let comp_range = range.Clone()?;
-            comp_range.Collapse(ec, TF_ANCHOR_START)?;
-            comp_range.ShiftStart(ec, -(reading_len as i32), &mut shifted, std::ptr::null())?;
+            if !use_postbuf {
+                // 通常環境: 読みの範囲にコンポジションを開始
+                let comp_range = range.Clone()?;
+                comp_range.Collapse(ec, TF_ANCHOR_START)?;
+                comp_range.ShiftStart(ec, -(reading_len as i32), &mut shifted, std::ptr::null())?;
 
-            let ctx_comp: ITfContextComposition = self.context.cast()?;
-            let composition = ctx_comp.StartComposition(
-                ec,
-                &comp_range,
-                &self.composition_sink,
-            )?;
+                let ctx_comp: ITfContextComposition = self.context.cast()?;
+                let composition = ctx_comp.StartComposition(
+                    ec,
+                    &comp_range,
+                    &self.composition_sink,
+                )?;
 
-            // 第一候補でテキスト置換
-            let first = &candidates[0];
-            let text_w: Vec<u16> = first.encode_utf16().collect();
-            let comp_range2 = composition.GetRange()?;
-            comp_range2.SetText(ec, TF_ST_CORRECTION, &text_w)?;
+                // 第一候補でテキスト置換
+                let first = &candidates[0];
+                let text_w: Vec<u16> = first.encode_utf16().collect();
+                let comp_range2 = composition.GetRange()?;
+                comp_range2.SetText(ec, TF_ST_CORRECTION, &text_w)?;
 
-            // カーソルをコンポジション末尾に移動
-            set_cursor_to_end(&self.context, ec, &comp_range2)?;
-
-            // SharedComposition にセット
-            self.shared_comp.set(composition);
+                set_cursor_to_end(&self.context, ec, &comp_range2)?;
+                self.shared_comp.set(composition);
+            }
 
             // MazegakiState を結果スロットにセット
             let state = MazegakiState {
                 reading,
                 candidates: candidates.to_vec(),
                 selected: 0,
+                postbuf_reading_len: if use_postbuf { Some(reading_len) } else { None },
             };
             *self.result_slot.lock().unwrap() = Some(state);
         }

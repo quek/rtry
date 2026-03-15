@@ -85,17 +85,16 @@ uninstall.bat # regsvr32 /u で DLL 登録解除
 
 ## 既知の制限
 
-### CUAS環境（Emacs等）でのテキスト読み取り不可
+### CUAS環境（Emacs等）での制限
 Emacs等のIMM32ベースアプリでは、CUAS互換レイヤーのテキストストアが書き込み専用のため、
-ストロークヘルプと交ぜ書き変換が動作しない（`ShiftStart`=0, `GetText`=0文字）。
-通常のストローク入力（テキスト書き込みのみ）は正常に動作する。
+TSFの`GetText`で既存テキストを読み取れない（`ShiftStart`=0, `GetText`=0文字）。
 
-- **確認済み事実**: Emacsソース（w32fns.c）にTSF/ITextStoreACPの実装なし、`IMR_DOCUMENTFEED`処理もなし
-- **他IMEの対策**: Mozc=TSF→IMR_DOCUMENTFEEDフォールバック、tsf-tutcode=さらに内部バッファフォールバック
-- **対策候補**: CommitEditSessionで出力した文字を内部バッファに記録し、TSF読み取り失敗時に使用（tsf-tutcode方式）
+- **対策**: 確定済みテキストを内部バッファ（postbuf、最大10文字）に記録し、TSF読み取り失敗時にフォールバック使用（tsf-tutcode方式）
+- **ストロークヘルプ**: postbuf末尾1文字で逆引き
+- **交ぜ書き変換**: postbuf内容で最長一致検索。候補選択中はドキュメント非更新、確定時にSendInputでバックスペース送信後に候補テキストを挿入
+- **制約**: IMEオン後に入力した文字のみpostbufに蓄積されるため、既存テキストに対する操作は不可
 
 ## 未実装機能
-- CUAS環境向け内部バッファフォールバック
 - 後置型交ぜ書き変換（18-98）
 - 部首合成（`@b`）
 - ヒストリ入力（`@q`）
