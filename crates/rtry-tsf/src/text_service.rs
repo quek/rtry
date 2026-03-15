@@ -209,7 +209,7 @@ impl ITfTextInputProcessor_Impl for TryCodeTextService_Impl {
             crate::debug_log!("AdviseKeyEventSink succeeded");
         }
 
-        *self.is_open.borrow_mut() = true;
+        // IME off で起動（Alt+` で ON に切り替え）
 
         // 言語バーボタンの追加
         match language_bar::add_langbar_button(&thread_mgr) {

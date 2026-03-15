@@ -17,14 +17,18 @@ if exist "%INSTALL_DLL%" (
     ) else (
         echo [ERROR] DLL unregistration failed.
     )
-    del "%INSTALL_DLL%"
+    del "%INSTALL_DLL%" 2>nul
+    if exist "%INSTALL_DLL%" (
+        echo [ERROR] DLL is locked. Checking processes:
+        tasklist /m rtry_tsf.dll
+        echo.
+        echo Close the above processes and retry.
+        pause
+        exit /b 1
+    )
     echo [OK] DLL removed: %INSTALL_DLL%
 ) else (
     echo [SKIP] DLL not found: %INSTALL_DLL%
-)
-
-if exist "%ProgramFiles%\rtry\debug.log" (
-    del "%ProgramFiles%\rtry\debug.log"
 )
 
 echo.

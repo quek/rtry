@@ -21,10 +21,20 @@ if not exist "%BUILD_DLL%" (
     exit /b 1
 )
 
-:: Copy DLL and data files to Program Files (accessible by AppContainer)
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-copy /y "%BUILD_DLL%" "%INSTALL_DLL%" >nul
+
+:: Check if DLL is locked by another process
+copy /y "%BUILD_DLL%" "%INSTALL_DLL%" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] DLL is locked. Checking processes:
+    tasklist /m rtry_tsf.dll
+    echo.
+    echo Close the above processes and retry.
+    pause
+    exit /b 1
+)
 echo [OK] DLL copied to %INSTALL_DLL%
+
 copy /y "%TABLE_SRC%" "%INSTALL_DIR%\try.tbl" >nul
 echo [OK] try.tbl copied to %INSTALL_DIR%\try.tbl
 if exist "%DIC_SRC%" (
@@ -32,7 +42,6 @@ if exist "%DIC_SRC%" (
     echo [OK] mazegaki.dic copied to %INSTALL_DIR%\mazegaki.dic
 )
 
-:: Register DLL from install location
 regsvr32 /s "%INSTALL_DLL%"
 if %errorlevel% equ 0 (
     echo [OK] DLL registered: %INSTALL_DLL%
