@@ -37,11 +37,15 @@ uninstall.bat # regsvr32 /u で DLL 登録解除
 - DRY: 重複を排除する
 - edition 2024, 最新の crate バージョンを使用
 - モダンな Rust イディオム
+- コードを書いたら都度レビュー、リファクタリングを行う
 
 ### 調査・デバッグ手順
 - **推測でコードを書くな**。まずコードを読んで原因を追ってから修正する
+- **デバッグは上流から下流へ**: まず関数が呼ばれているか → 引数は正しいか → ロジックは正しいか の順で確認する
+- **前提を検証してから実装する**: 「この関数が呼ばれるはず」等の前提はログで検証してから次に進む
 - ログ追加の前に、コードのフローを追って原因を特定する
 - 「可能性がある」ではなく、確実に原因を特定してから修正する
+- **実行するスクリプト・コマンドは中身を確認してから指示する**
 - windows crate の API は `~/.cargo/registry/src/` 内のソースを grep して確認する
 - **使用するライブラリのガイド・リファレンスマニュアルを調査してから実装する**
   - windows crate: https://microsoft.github.io/windows-docs-rs/
@@ -53,14 +57,40 @@ uninstall.bat # regsvr32 /u で DLL 登録解除
   - CorvusSKK (C++ TSF IME): https://github.com/corvusskk/corvusskk
   - 既存の T-Code IME 実装（tc2, tcode-mode 等）の設計を参考にする
 
-### Windows TSF 実装の注意点
-- edition 2024 では `ManuallyDrop` union フィールドへの書き込みに `(*field)` が必要
-- VARIANT の読み書きは信頼性が低い。内部フラグ（RefCell<bool>）の方が確実
-- `#[unsafe(no_mangle)]` が必要（edition 2024）
-- `unsafe fn` の本体内でも `unsafe {}` ブロックが必要
-- windows 0.62 の COM メソッドの引数型は `Ref<'_, T>`（`Option<&T>` ではない）
-- `RequestEditSession` は 3 引数（4 ではない）
-- `ITfComposition::EndComposition` は `ec: u32` 引数が必要
+## rtry-tsf アーキテクチャ
+
+### COM インターフェース
+- `ITfTextInputProcessor` - Activate/Deactivate（text_service.rs）
+- `ITfKeyEventSink` - OnTestKeyDown/OnKeyDown/OnPreservedKey（key_handler.rs）
+- `ITfCompositionSink` - OnCompositionTerminated（text_service.rs）
+- `ITfEditSession` - DoEditSession の 6 種類（edit_session.rs）
+- `IClassFactory` - CreateInstance（class_factory.rs）
+
+### ファイル構成
+- `lib.rs` - DllMain, DllGetClassObject 等の DLL エントリポイント、GUID 定義
+- `text_service.rs` - TryCodeTextService 本体（Activate/Deactivate、エンジン初期化、SharedPostBuf、PendingReplace）
+- `key_handler.rs` - キーイベント処理、IME オン/オフトグル、vk_to_char 変換、交ぜ書きキー処理、VKBackBasedDeleter
+- `edit_session.rs` - Commit, Composing, EndComposition, CharHelp, MazegakiStart, MazegakiUpdate の各 EditSession
+- `composition.rs` - SharedComposition（Arc<Mutex<Option<ITfComposition>>>）
+- `candidate_window.rs` - 交ぜ書き候補ウィンドウ（Win32ポップアップ、番号付き候補表示）
+- `stroke_help.rs` - ストロークヘルプ表示、カーソル位置取得（get_caret_screen_pos）
+- `language_bar.rs` - 言語バーボタン
+- `register.rs` - regsvr32 用の COM/TSF 登録処理
+- `class_factory.rs` - IClassFactory 実装
+
+## Windows TSF 実装の注意点
+
+### TSF キーイベント
+- 一部のアプリ（Windows 11 メモ帳等）は `OnTestKeyDown` を呼ばず `OnKeyDown` を直接呼ぶ
+- そのため、キーフィルタリング（修飾キーチェック等）は `OnTestKeyDown` と `OnKeyDown` の両方に必要
+- `OnKeyDown` の戻り値 `FALSE` でキーはアプリにパススルーされる
+
+### CUAS環境（Emacs等）向け postbuf / VKBackBasedDeleter
+- CUAS互換レイヤーのテキストストアは書き込み専用（ShiftStart/GetText が 0 を返す）
+- `SharedPostBuf`: 確定テキストを最大10文字保持する内部バッファ（TSF読み取り失敗時のフォールバック）
+- `PendingReplace`: VKBackBasedDeleterパターン（tsf-tutcode/Mozc由来）の状態
+- 交ぜ書き確定フロー: N+1個のVK_BACKをSendInputで送信 → 最初のN個はOnTestKeyDownでFALSEを返しアプリに渡す → 番兵をIMEが消費してdo_commitを実行
+- `RequestEditSession(TF_ES_ASYNCDONTCARE)` は同期実行される場合があり、SendInputキューより先に処理されるため、SendInput後に直接do_commitを呼んではならない
 
 ### IME オン/オフの実装
 - `GUID_COMPARTMENT_KEYBOARD_OPENCLOSE` コンパートメント方式は使わない
@@ -70,6 +100,18 @@ uninstall.bat # regsvr32 /u で DLL 登録解除
 ### カーソル位置
 - テキスト確定後は `Collapse(TF_ANCHOR_END)` + `SetSelection` でカーソルを末尾に移動
 - IME の常識：変換後の文字はカーソルの左側に挿入される
+
+### Edition 2024 の罠
+- `ManuallyDrop` union フィールドへの書き込みに `(*field)` が必要
+- VARIANT の読み書きは信頼性が低い。内部フラグ（RefCell<bool>）の方が確実
+- `#[unsafe(no_mangle)]` が必要
+- `unsafe fn` の本体内でも `unsafe {}` ブロックが必要
+
+### windows crate 0.62 の API
+- COM メソッドの引数型は `Ref<'_, T>`（`Option<&T>` ではない）
+- `RequestEditSession` は 3 引数（4 ではない）
+- `ITfComposition::EndComposition` は `ec: u32` 引数が必要
+- `TF_ANCHOR_END` が正しい定数名（`TfAnchor_TF_ANCHOR_END` ではない）
 
 ## テーブル形式 (try.tbl)
 - 40個の深さ2フラットセクション = base table（2打鍵、40×40）
@@ -82,6 +124,7 @@ uninstall.bat # regsvr32 /u で DLL 登録解除
 - ストロークヘルプ（`55` でカーソル前文字の打鍵手順表示）
 - 候補ウィンドウ（Win32ポップアップ、番号選択対応）
 - IME オン/オフトグル（Alt+` / 半角全角）
+- 修飾キー（Ctrl/Shift/Alt）付きキーのパススルー（C-c, C-v 等）
 
 ## 既知の制限
 
