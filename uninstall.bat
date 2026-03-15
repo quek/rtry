@@ -1,7 +1,6 @@
 @echo off
 setlocal
 
-:: Admin check
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] Run as Administrator.
@@ -9,23 +8,23 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-set DLL_PATH=%~dp0target\release\rtry_tsf.dll
+set INSTALL_DLL=%ProgramFiles%\rtry\rtry_tsf.dll
 
-if exist "%DLL_PATH%" (
-    regsvr32 /u /s "%DLL_PATH%"
+if exist "%INSTALL_DLL%" (
+    regsvr32 /u /s "%INSTALL_DLL%"
     if %errorlevel% equ 0 (
         echo [OK] DLL unregistered.
     ) else (
         echo [ERROR] DLL unregistration failed.
     )
+    del "%INSTALL_DLL%"
+    echo [OK] DLL removed: %INSTALL_DLL%
 ) else (
-    echo [SKIP] DLL not found: %DLL_PATH%
+    echo [SKIP] DLL not found: %INSTALL_DLL%
 )
 
-:: ユーザーデータ（try.tbl, mazegaki.dic 等）は保持する
-:: デバッグログのみ削除
-if exist "%APPDATA%\rtry\debug.log" (
-    del "%APPDATA%\rtry\debug.log"
+if exist "%ProgramFiles%\rtry\debug.log" (
+    del "%ProgramFiles%\rtry\debug.log"
 )
 
 echo.

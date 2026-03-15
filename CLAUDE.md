@@ -16,12 +16,23 @@ T-Code を拡張した Try-Code の Windows IME。Rust で TSF (Text Services Fr
 - VK_OEM_MINUS (0xBD) → `;` としてエンジンに渡す（T-Code の40キー配列の `;` 位置に対応）
 - IME オン/オフトグルは Alt+` を使用
 
+## インストール構成
+
+- **DLL・データファイル**: `C:\Program Files\rtry\`（AppContainer からもアクセス可能）
+  - `rtry_tsf.dll` - IME 本体
+  - `try.tbl` - 変換テーブル
+  - `mazegaki.dic` - 交ぜ書き辞書
+  - `debug.log` - デバッグログ
+- DLL はビルド成果物を `install.bat` で `C:\Program Files\rtry\` にコピーして `regsvr32` で登録
+- プロファイル登録は `ITfInputProcessorProfileMgr::RegisterProfile`（`bEnabledByDefault: true`）
+- カテゴリ登録: `GUID_TFCAT_TIP_KEYBOARD`, `GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT`, `GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT`
+
 ## ビルド・テスト手順
 
 ```
 cargo build --release -p rtry-tsf
-install.bat   # regsvr32 で DLL 登録
-uninstall.bat # regsvr32 /u で DLL 登録解除
+uninstall.bat # DLL 登録解除・削除（管理者権限）
+install.bat   # DLL・データを C:\Program Files\rtry\ にコピー＆登録（管理者権限）
 ```
 
 ### DLL ロック問題
@@ -136,6 +147,12 @@ TSFの`GetText`で既存テキストを読み取れない（`ShiftStart`=0, `Get
 - **ストロークヘルプ**: postbuf末尾1文字で逆引き
 - **交ぜ書き変換**: postbuf内容で最長一致検索。候補選択中はドキュメント非更新。確定時はVKBackBasedDeleterパターン（tsf-tutcode/Mozc由来）でN+1個のVK_BACKをSendInputで送信し、最初のN個はアプリに渡して読みを削除、最後の番兵をIMEが消費してTSF commitを実行。TSFコールバックは同一スレッドで直列処理されるため順序保証される
 - **制約**: IMEオン後に入力した文字のみpostbufに蓄積されるため、既存テキストに対する操作は不可
+
+## AppContainer 対応（スタートメニュー検索等）
+- SearchHost.exe 等の AppContainer プロセスは `%APPDATA%` にアクセスできない
+- DLL・データファイルは `C:\Program Files\rtry\` に配置（AppContainer からデフォルトで読み取り可能）
+- データファイル検索順: DLL と同じディレクトリ → `%APPDATA%\rtry\`（フォールバック）
+- デバッグログも DLL ディレクトリに出力（`C:\Program Files\rtry\debug.log`）
 
 ## 未実装機能
 - 後置型交ぜ書き変換（18-98）

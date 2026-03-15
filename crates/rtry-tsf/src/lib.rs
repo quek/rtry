@@ -10,6 +10,24 @@ mod register;
 mod stroke_help;
 mod candidate_window;
 
+/// デバッグログのパスを決定（DLLディレクトリ優先、AppDataフォールバック）
+fn debug_log_path() -> std::path::PathBuf {
+    // DLLと同じディレクトリ（C:\Program Files\rtry\ 等、AppContainerからも書き込み可能）
+    let mut buf = vec![0u16; 260];
+    let len = unsafe {
+        windows::Win32::System::LibraryLoader::GetModuleFileNameW(Some(dll_module()), &mut buf)
+    } as usize;
+    if len > 0 {
+        let dll_path = String::from_utf16_lossy(&buf[..len]);
+        if let Some(parent) = std::path::Path::new(&dll_path).parent() {
+            return parent.join("debug.log");
+        }
+    }
+    // フォールバック: %APPDATA%\rtry\debug.log
+    std::path::Path::new(&std::env::var("APPDATA").unwrap_or_default())
+        .join("rtry").join("debug.log")
+}
+
 /// デバッグログをファイルに出力するマクロ
 macro_rules! debug_log {
     ($($arg:tt)*) => {{
@@ -17,8 +35,7 @@ macro_rules! debug_log {
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(std::path::Path::new(&std::env::var("APPDATA").unwrap_or_default())
-                .join("rtry").join("debug.log"))
+            .open(crate::debug_log_path())
         {
             let _ = writeln!(f, "{}", format!($($arg)*));
         }

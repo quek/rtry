@@ -144,18 +144,32 @@ impl TryCodeTextService {
             .map(|p| std::path::PathBuf::from(p).join("rtry").join("try.tbl"))
     }
 
+    fn dll_dir_mazegaki_path() -> Option<std::path::PathBuf> {
+        use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
+        let mut buf = vec![0u16; 260];
+        let len = unsafe { GetModuleFileNameW(Some(crate::dll_module()), &mut buf) } as usize;
+        if len == 0 { return None; }
+        let dll_path = String::from_utf16_lossy(&buf[..len]);
+        let path = std::path::PathBuf::from(dll_path);
+        path.parent().map(|p| p.join("mazegaki.dic"))
+    }
+
+    fn appdata_mazegaki_path() -> Option<std::path::PathBuf> {
+        std::env::var("APPDATA").ok()
+            .map(|p| std::path::PathBuf::from(p).join("rtry").join("mazegaki.dic"))
+    }
+
     /// 交ぜ書き辞書を初期化
     fn init_mazegaki_dict(&self) {
-        let Some(path) = std::env::var("APPDATA").ok()
-            .map(|p| std::path::PathBuf::from(p).join("rtry").join("mazegaki.dic"))
-        else {
+        let paths = [
+            Self::dll_dir_mazegaki_path(),
+            Self::appdata_mazegaki_path(),
+        ];
+
+        let Some(path) = paths.into_iter().flatten().find(|p| p.exists()) else {
+            crate::debug_log!("Mazegaki dictionary not found");
             return;
         };
-
-        if !path.exists() {
-            crate::debug_log!("Mazegaki dictionary not found: {:?}", path);
-            return;
-        }
 
         match MazegakiDictionary::load(&path) {
             Ok(dict) => {

@@ -104,22 +104,37 @@ pub fn register_server() -> Result<()> {
             &GUID_TFCAT_TIP_KEYBOARD,
             &CLSID_TRY_CODE_IME,
         )?;
+        // UWP/Immersive アプリ（スタートメニュー検索等）対応
+        cat_mgr.RegisterCategory(
+            &CLSID_TRY_CODE_IME,
+            &GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
+            &CLSID_TRY_CODE_IME,
+        )?;
+        // システムトレイ対応
+        cat_mgr.RegisterCategory(
+            &CLSID_TRY_CODE_IME,
+            &GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
+            &CLSID_TRY_CODE_IME,
+        )?;
 
-        // 3. プロファイル登録
-        let profiles: ITfInputProcessorProfiles =
+        // 3. プロファイル登録（ITfInputProcessorProfileMgr: Immersive対応に必要）
+        let profile_mgr: ITfInputProcessorProfileMgr =
             CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
 
-        let display_name: Vec<u16> = IME_DISPLAY_NAME.encode_utf16().chain(std::iter::once(0)).collect();
-        let icon_file: Vec<u16> = dll_path.encode_utf16().chain(std::iter::once(0)).collect();
+        let display_name: Vec<u16> = IME_DISPLAY_NAME.encode_utf16().collect();
+        let icon_file: Vec<u16> = dll_path.encode_utf16().collect();
 
-        profiles.Register(&CLSID_TRY_CODE_IME)?;
-        profiles.AddLanguageProfile(
+        profile_mgr.RegisterProfile(
             &CLSID_TRY_CODE_IME,
             LANGID_JAPANESE,
             &GUID_PROFILE,
             &display_name,
             &icon_file,
-            0,
+            0,    // iconIndex
+            windows::Win32::UI::Input::KeyboardAndMouse::HKL::default(), // hklSubstitute
+            0,    // dwPreferredLayout
+            true, // bEnabledByDefault
+            0,    // dwFlags
         )?;
     }
 
@@ -138,11 +153,26 @@ pub fn unregister_server() -> Result<()> {
             &GUID_TFCAT_TIP_KEYBOARD,
             &CLSID_TRY_CODE_IME,
         );
+        let _ = cat_mgr.UnregisterCategory(
+            &CLSID_TRY_CODE_IME,
+            &GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT,
+            &CLSID_TRY_CODE_IME,
+        );
+        let _ = cat_mgr.UnregisterCategory(
+            &CLSID_TRY_CODE_IME,
+            &GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT,
+            &CLSID_TRY_CODE_IME,
+        );
 
         // プロファイル解除
-        let profiles: ITfInputProcessorProfiles =
+        let profile_mgr: ITfInputProcessorProfileMgr =
             CoCreateInstance(&CLSID_TF_InputProcessorProfiles, None, CLSCTX_INPROC_SERVER)?;
-        let _ = profiles.Unregister(&CLSID_TRY_CODE_IME);
+        let _ = profile_mgr.UnregisterProfile(
+            &CLSID_TRY_CODE_IME,
+            LANGID_JAPANESE,
+            &GUID_PROFILE,
+            0,
+        );
     }
 
     // COM レジストリ解除
