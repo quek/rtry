@@ -1,5 +1,7 @@
 //! 入力エンジン: 状態マシンベースの打鍵処理
 
+use std::sync::Arc;
+
 use crate::history::HistoryManager;
 use crate::table::{SpecialFunction, TableEntry, TryCodeTable};
 
@@ -35,7 +37,7 @@ pub enum EngineOutput {
 
 /// try-code 入力エンジン
 pub struct Engine {
-    table: TryCodeTable,
+    table: Arc<TryCodeTable>,
     state: EngineState,
     history: HistoryManager,
 }
@@ -43,7 +45,7 @@ pub struct Engine {
 impl Engine {
     pub fn new(table: TryCodeTable) -> Self {
         Engine {
-            table,
+            table: Arc::new(table),
             state: EngineState::Idle,
             history: HistoryManager::default(),
         }
@@ -51,6 +53,11 @@ impl Engine {
 
     pub fn state(&self) -> &EngineState {
         &self.state
+    }
+
+    /// テーブルの共有参照を取得（ストロークヘルプ等で使用）
+    pub fn table(&self) -> Arc<TryCodeTable> {
+        self.table.clone()
     }
 
     pub fn history(&self) -> &HistoryManager {

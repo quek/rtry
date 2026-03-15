@@ -8,6 +8,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::TextServices::*;
 
 use rtry_core::engine::EngineOutput;
+use rtry_core::table::SpecialFunction;
 
 use crate::edit_session;
 use crate::text_service::TryCodeTextService_Impl;
@@ -143,8 +144,15 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
             }
             EngineOutput::Consumed => Ok(TRUE),
             EngineOutput::PassThrough => Ok(FALSE),
-            EngineOutput::SpecialAction(_func) => {
-                // TODO: 特殊機能の実装
+            EngineOutput::SpecialAction(func) => {
+                match func {
+                    SpecialFunction::CharHelp(_) => {
+                        self.do_char_help(&context)?;
+                    }
+                    _ => {
+                        crate::debug_log!("Unhandled special action: {:?}", func);
+                    }
+                }
                 Ok(TRUE)
             }
         }
@@ -205,6 +213,27 @@ impl TryCodeTextService_Impl {
         let session: ITfEditSession = session.into();
         unsafe {
             let _ = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE)?;
+        }
+        Ok(())
+    }
+
+    /// ストロークヘルプを表示する
+    fn do_char_help(&self, context: &ITfContext) -> Result<()> {
+        let tid = *self.client_id.borrow();
+        let engine_ref = self.engine.borrow();
+        let Some(ref engine) = *engine_ref else {
+            return Ok(());
+        };
+        let table = engine.table();
+        drop(engine_ref);
+
+        let session = edit_session::CharHelpEditSession::new(
+            context.clone(),
+            table,
+        );
+        let session: ITfEditSession = session.into();
+        unsafe {
+            let _ = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READ)?;
         }
         Ok(())
     }

@@ -7,7 +7,12 @@
 //! TryCodeTextServiceのcomposition状態を更新する。
 
 use windows::core::*;
+use windows::Win32::Foundation::*;
 use windows::Win32::UI::TextServices::*;
+
+use std::sync::Arc;
+
+use rtry_core::table::TryCodeTable;
 
 use crate::composition::SharedComposition;
 
@@ -181,6 +186,76 @@ impl ITfEditSession_Impl for EndCompositionEditSession_Impl {
                 range.SetText(ec, TF_ST_CORRECTION, &[])?;
                 let _ = composition.EndComposition(ec);
                 log::debug!("EndCompositionEditSession: ended composition");
+            }
+        }
+        Ok(())
+    }
+}
+
+/// ストロークヘルプ用のエディットセッション
+///
+/// カーソル位置（またはその直前）の文字を読み取り、逆引きテーブルで
+/// ストロークを取得してツールチップで表示する。
+#[implement(ITfEditSession)]
+pub struct CharHelpEditSession {
+    context: ITfContext,
+    table: Arc<TryCodeTable>,
+}
+
+impl CharHelpEditSession {
+    pub fn new(context: ITfContext, table: Arc<TryCodeTable>) -> Self {
+        CharHelpEditSession { context, table }
+    }
+}
+
+impl ITfEditSession_Impl for CharHelpEditSession_Impl {
+    fn DoEditSession(&self, ec: u32) -> Result<()> {
+        unsafe {
+            // カーソル位置を取得
+            let mut sel = [TF_SELECTION::default()];
+            let mut fetched = 0u32;
+            self.context.GetSelection(ec, TF_DEFAULT_SELECTION, &mut sel, &mut fetched)?;
+            if fetched == 0 {
+                return Ok(());
+            }
+
+            let range = std::mem::ManuallyDrop::into_inner(sel[0].range.clone())
+                .ok_or_else(|| Error::from_hresult(E_FAIL))?;
+
+            // カーソル位置を起点にレンジを作成（1文字前に拡張）
+            let read_range = range.Clone()?;
+            read_range.Collapse(ec, TF_ANCHOR_START)?;
+            let mut actual = 0i32;
+            read_range.ShiftStart(ec, -1, &mut actual, std::ptr::null())?;
+
+            // テキストを読み取り
+            let mut buf = [0u16; 4]; // UTF-16 で最大2ユニット + 余裕
+            let mut cch = 0u32;
+            read_range.GetText(ec, 0, &mut buf, &mut cch)?;
+
+            if cch == 0 {
+                return Ok(());
+            }
+
+            let text = String::from_utf16_lossy(&buf[..cch as usize]);
+            let ch = text.trim();
+            if ch.is_empty() {
+                return Ok(());
+            }
+
+            // 逆引き
+            let strokes = self.table.reverse_lookup(ch);
+            if strokes.is_empty() {
+                crate::debug_log!("CharHelp: no strokes found for '{}'", ch);
+                let msg = format!("「{}」 ストロークなし", ch);
+                crate::stroke_help::show_stroke_help(&msg);
+            } else {
+                let stroke_strs: Vec<String> = strokes.iter()
+                    .map(|s| s.to_display_string())
+                    .collect();
+                let msg = format!("「{}」 {}", ch, stroke_strs.join(" / "));
+                crate::debug_log!("CharHelp: '{}' → {}", ch, msg);
+                crate::stroke_help::show_stroke_help(&msg);
             }
         }
         Ok(())

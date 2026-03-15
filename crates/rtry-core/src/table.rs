@@ -39,6 +39,33 @@ pub enum TableEntry {
     Special(SpecialFunction),
 }
 
+/// ストロークシーケンス（逆引き用）
+#[derive(Debug, Clone, PartialEq)]
+pub enum StrokeSequence {
+    /// 2打鍵 (first_index, second_index)
+    TwoStroke(usize, usize),
+    /// 3打鍵 Space前置 (first_index, second_index)
+    ThreeStroke(usize, usize),
+}
+
+impl StrokeSequence {
+    /// 表示用文字列に変換（例: "a → k", "Space → x → y"）
+    pub fn to_display_string(&self) -> String {
+        match self {
+            StrokeSequence::TwoStroke(first, second) => {
+                let k1 = QWERTY_KEYS.get(*first).unwrap_or(&'?');
+                let k2 = QWERTY_KEYS.get(*second).unwrap_or(&'?');
+                format!("{} → {}", k1, k2)
+            }
+            StrokeSequence::ThreeStroke(first, second) => {
+                let k1 = QWERTY_KEYS.get(*first).unwrap_or(&'?');
+                let k2 = QWERTY_KEYS.get(*second).unwrap_or(&'?');
+                format!("Space → {} → {}", k1, k2)
+            }
+        }
+    }
+}
+
 /// 特殊機能の定義
 #[derive(Debug, Clone, PartialEq)]
 pub enum SpecialFunction {
@@ -68,6 +95,8 @@ pub struct TryCodeTable {
     /// 3打鍵拡張テーブル (Space前置): ext_table[first_key][second_key]
     pub ext_table: Vec<Vec<TableEntry>>,
     key_index: HashMap<char, usize>,
+    /// 逆引きテーブル: 文字 → ストロークシーケンスのリスト
+    reverse_map: HashMap<String, Vec<StrokeSequence>>,
 }
 
 impl TryCodeTable {
@@ -97,7 +126,35 @@ impl TryCodeTable {
             key_index.insert(key, i);
         }
 
-        Ok(TryCodeTable { name, key_layout, base_table, ext_table, key_index })
+        let reverse_map = Self::build_reverse_map(&base_table, &ext_table);
+        Ok(TryCodeTable { name, key_layout, base_table, ext_table, key_index, reverse_map })
+    }
+
+    /// 逆引きテーブルを構築
+    fn build_reverse_map(
+        base_table: &[Vec<TableEntry>],
+        ext_table: &[Vec<TableEntry>],
+    ) -> HashMap<String, Vec<StrokeSequence>> {
+        let mut map: HashMap<String, Vec<StrokeSequence>> = HashMap::new();
+        for (i, row) in base_table.iter().enumerate() {
+            for (j, entry) in row.iter().enumerate() {
+                if let TableEntry::Char(s) = entry {
+                    map.entry(s.clone())
+                        .or_default()
+                        .push(StrokeSequence::TwoStroke(i, j));
+                }
+            }
+        }
+        for (i, row) in ext_table.iter().enumerate() {
+            for (j, entry) in row.iter().enumerate() {
+                if let TableEntry::Char(s) = entry {
+                    map.entry(s.clone())
+                        .or_default()
+                        .push(StrokeSequence::ThreeStroke(i, j));
+                }
+            }
+        }
+        map
     }
 
     pub fn key_to_index(&self, key: char) -> Option<usize> {
@@ -126,6 +183,11 @@ impl TryCodeTable {
         let i = self.key_to_index(first)?;
         let j = self.key_to_index(second)?;
         self.lookup_3stroke(i, j)
+    }
+
+    /// 文字からストロークシーケンスを逆引き
+    pub fn reverse_lookup(&self, ch: &str) -> &[StrokeSequence] {
+        self.reverse_map.get(ch).map_or(&[], |v| v.as_slice())
     }
 }
 
@@ -444,5 +506,31 @@ mod tests {
         let entry = table.lookup_2stroke(0, 15);
         assert_eq!(entry, Some(&TableEntry::Char("簡".to_string())),
             "base[0][15] should be 簡, got {:?}", entry);
+    }
+
+    #[test]
+    fn test_charhelp_positions() {
+        let table = load_table();
+        // try.tbl: 55 = @H = CharHelp(true)
+        // key '5' = index 4
+        let entry_55 = &table.base_table[4][4];
+        assert_eq!(*entry_55, TableEntry::Special(SpecialFunction::CharHelp(true)),
+            "base_table[4][4] (55) should be CharHelp(true), got {:?}", entry_55);
+    }
+
+    #[test]
+    fn test_reverse_lookup() {
+        let table = load_table();
+
+        // "ヲ" は base[0][10] → TwoStroke(0, 10) = "1 → q"
+        let strokes = table.reverse_lookup("ヲ");
+        assert!(!strokes.is_empty(), "ヲ should have strokes");
+        assert!(strokes.contains(&StrokeSequence::TwoStroke(0, 10)),
+            "ヲ should have TwoStroke(0, 10), got {:?}", strokes);
+        assert_eq!(strokes[0].to_display_string(), "1 → q");
+
+        // 存在しない文字
+        let strokes = table.reverse_lookup("㍻");
+        assert!(strokes.is_empty());
     }
 }
