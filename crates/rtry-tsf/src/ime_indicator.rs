@@ -18,7 +18,7 @@ static INDICATOR_ACTIVE: AtomicBool = AtomicBool::new(false);
 const INDICATOR_CLASS: PCWSTR = w!("RtryImeIndicator");
 const INDICATOR_SIZE: i32 = 20;
 
-/// IME ON状態にする（次の update_position でウィンドウが作成される）
+/// IME ON状態にする（IndicatorEditSession で位置取得後に表示される）
 pub fn show() {
     INDICATOR_ACTIVE.store(true, Ordering::SeqCst);
 }

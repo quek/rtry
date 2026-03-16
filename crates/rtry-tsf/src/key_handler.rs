@@ -175,6 +175,10 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                 crate::ime_indicator::dismiss();
             } else {
                 crate::ime_indicator::show();
+                // EditSession 経由で GetTextExt → インジケーター表示
+                if let Some(context) = pic.clone() {
+                    let _ = self.do_show_indicator(&context);
+                }
             }
             return Ok(TRUE);
         }
@@ -555,6 +559,17 @@ impl TryCodeTextService_Impl {
             let msg = parts.join("  ");
             crate::stroke_help::show_stroke_help(&msg);
         }
+    }
+
+    /// IMEインジケーターを表示する（EditSession 経由で位置取得）
+    fn do_show_indicator(&self, context: &ITfContext) -> Result<()> {
+        let tid = *self.client_id.borrow();
+        let session = edit_session::IndicatorEditSession::new(context.clone());
+        let session: ITfEditSession = session.into();
+        unsafe {
+            let _ = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READ)?;
+        }
+        Ok(())
     }
 
     /// 交ぜ書き変換をキャンセル（元の読みに戻す）

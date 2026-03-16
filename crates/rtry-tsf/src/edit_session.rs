@@ -444,3 +444,26 @@ impl ITfEditSession_Impl for MazegakiUpdateEditSession_Impl {
     }
 }
 
+/// IMEインジケーター表示用のエディットセッション（読み取り専用）
+///
+/// IME ON トグル時に GetTextExt でカーソル位置を取得し、
+/// インジケーターウィンドウを表示する。
+#[implement(ITfEditSession)]
+pub struct IndicatorEditSession {
+    context: ITfContext,
+}
+
+impl IndicatorEditSession {
+    pub fn new(context: ITfContext) -> Self {
+        IndicatorEditSession { context }
+    }
+}
+
+impl ITfEditSession_Impl for IndicatorEditSession_Impl {
+    fn DoEditSession(&self, ec: u32) -> Result<()> {
+        crate::caret_rect::update_caret_rect(ec, &self.context);
+        crate::ime_indicator::update_position();
+        Ok(())
+    }
+}
+
