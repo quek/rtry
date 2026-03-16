@@ -6,6 +6,7 @@ mod key_handler;
 mod edit_session;
 mod composition;
 mod language_bar;
+mod function_provider;
 mod register;
 mod caret_rect;
 mod stroke_help;

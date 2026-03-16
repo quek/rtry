@@ -15,8 +15,19 @@ static INDICATOR_HWND: AtomicIsize = AtomicIsize::new(0);
 /// IME ON状態フラグ（ウィンドウ未作成でもON状態を記録）
 static INDICATOR_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+/// インジケーター表示の有効/無効（設定から制御）
+static INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
+
 const INDICATOR_CLASS: PCWSTR = w!("RtryImeIndicator");
 const INDICATOR_SIZE: i32 = 20;
+
+/// インジケーター表示の有効/無効を設定する
+pub fn set_enabled(enabled: bool) {
+    INDICATOR_ENABLED.store(enabled, Ordering::SeqCst);
+    if !enabled {
+        dismiss();
+    }
+}
 
 /// IME ON状態にする（IndicatorEditSession で位置取得後に表示される）
 pub fn show() {
@@ -36,7 +47,7 @@ pub fn dismiss() {
 
 /// インジケーターの位置をカーソルに追従させる（未作成なら作成する）
 pub fn update_position() {
-    if !INDICATOR_ACTIVE.load(Ordering::SeqCst) {
+    if !INDICATOR_ACTIVE.load(Ordering::SeqCst) || !INDICATOR_ENABLED.load(Ordering::SeqCst) {
         return;
     }
 

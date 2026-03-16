@@ -42,6 +42,13 @@ if exist "%DIC_SRC%" (
     echo [OK] mazegaki.dic copied to %INSTALL_DIR%\mazegaki.dic
 )
 
+:: Copy config tool
+set BUILD_CONFIG=%~dp0target\release\rtry-config.exe
+if exist "%BUILD_CONFIG%" (
+    copy /y "%BUILD_CONFIG%" "%INSTALL_DIR%\rtry-config.exe" >nul
+    echo [OK] rtry-config.exe copied to %INSTALL_DIR%\rtry-config.exe
+)
+
 regsvr32 /s "%INSTALL_DLL%"
 if %errorlevel% equ 0 (
     echo [OK] DLL registered: %INSTALL_DLL%

@@ -211,8 +211,7 @@ name = "rtry-config"
 version = "0.1.0"
 dependencies = [
  "rtry-core",
- "serde",
- "serde_json",
+ "windows",
 ]
 
 [[package]]

@@ -1,6 +1,7 @@
 //! ITfTextInputProcessor 実装
 
 use std::cell::RefCell;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use windows::core::*;
@@ -79,8 +80,9 @@ pub struct TryCodeTextService {
     pub(crate) client_id: RefCell<u32>,
     pub(crate) engine: RefCell<Option<Engine>>,
     pub(crate) composition: SharedComposition,
-    pub(crate) is_open: RefCell<bool>,
+    pub(crate) is_open: Arc<AtomicBool>,
     langbar_button: RefCell<Option<ITfLangBarItemButton>>,
+    langbar_inputmode: RefCell<Option<ITfLangBarItemButton>>,
     pub(crate) mazegaki_state: SharedMazegakiState,
     pub(crate) mazegaki_dict: RefCell<Option<Arc<MazegakiDictionary>>>,
     pub(crate) postbuf: SharedPostBuf,
@@ -95,8 +97,9 @@ impl TryCodeTextService {
             client_id: RefCell::new(0),
             engine: RefCell::new(None),
             composition: SharedComposition::new(),
-            is_open: RefCell::new(false),
+            is_open: Arc::new(AtomicBool::new(false)),
             langbar_button: RefCell::new(None),
+            langbar_inputmode: RefCell::new(None),
             mazegaki_state: Arc::new(Mutex::new(None)),
             mazegaki_dict: RefCell::new(None),
             postbuf: Arc::new(Mutex::new(String::new())),
@@ -159,6 +162,13 @@ impl TryCodeTextService {
             .map(|p| std::path::PathBuf::from(p).join("rtry").join("mazegaki.dic"))
     }
 
+    /// 設定ファイルを読み込んで反映
+    fn apply_config(&self) {
+        let config = rtry_core::config::Config::load();
+        crate::ime_indicator::set_enabled(config.show_ime_indicator);
+        crate::debug_log!("Config: show_ime_indicator={}", config.show_ime_indicator);
+    }
+
     /// 交ぜ書き辞書を初期化
     fn init_mazegaki_dict(&self) {
         let paths = [
@@ -181,6 +191,37 @@ impl TryCodeTextService {
             }
         }
     }
+
+    /// 言語バーボタンのアイコン・テキストを更新通知
+    pub(crate) fn notify_langbar_update(&self) {
+        for button_ref in [&self.langbar_button, &self.langbar_inputmode] {
+            if let Some(ref button) = *button_ref.borrow() {
+                if let Ok(source) = button.cast::<ITfSource>() {
+                    // LangBarButton は ITfSource を実装しており、内部で sink を管理している
+                    // しかし外部から sink にアクセスする標準的な方法はないため、
+                    // ITfLangBarItemMgr 経由で更新通知を行う
+                    drop(source);
+                }
+            }
+        }
+        // ITfLangBarItemMgr を通じて全ボタンの更新を通知
+        if let Some(ref thread_mgr) = *self.thread_mgr.borrow() {
+            unsafe {
+                if let Ok(langbar_mgr) = thread_mgr.cast::<ITfLangBarItemMgr>() {
+                    // ボタンを一旦削除して再追加することで強制更新
+                    // （ITfLangBarItemSink 経由の通知より確実）
+                    for button_ref in [&self.langbar_button, &self.langbar_inputmode] {
+                        if let Some(ref button) = *button_ref.borrow() {
+                            if let Ok(item) = button.cast::<ITfLangBarItem>() {
+                                let _ = langbar_mgr.RemoveItem(&item);
+                                let _ = langbar_mgr.AddItem(&item);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl Drop for TryCodeTextService {
@@ -199,6 +240,7 @@ impl ITfTextInputProcessor_Impl for TryCodeTextService_Impl {
         crate::debug_log!("Activate called, tid={}", tid);
         self.init_engine();
         self.init_mazegaki_dict();
+        self.apply_config();
 
         // キーイベントシンクの登録
         unsafe {
@@ -209,12 +251,25 @@ impl ITfTextInputProcessor_Impl for TryCodeTextService_Impl {
             crate::debug_log!("AdviseKeyEventSink succeeded");
         }
 
+        // ITfFunctionProvider の登録（Windows設定画面からの設定起動用）
+        unsafe {
+            let source: ITfSourceSingle = thread_mgr.cast()?;
+            let provider = crate::function_provider::TryCodeFunctionProvider;
+            let provider_unknown: IUnknown = provider.into();
+            let _ = source.AdviseSingleSink(
+                tid,
+                &ITfFunctionProvider::IID,
+                &provider_unknown,
+            );
+        }
+
         // IME off で起動（Alt+` で ON に切り替え）
 
-        // 言語バーボタンの追加
-        match language_bar::add_langbar_button(&thread_mgr) {
-            Ok(button) => {
+        // 言語バーボタンの追加（独自GUID + GUID_LBI_INPUTMODE の2つ）
+        match language_bar::add_langbar_buttons(&thread_mgr, self.is_open.clone()) {
+            Ok((button, inputmode)) => {
                 *self.langbar_button.borrow_mut() = Some(button);
+                *self.langbar_inputmode.borrow_mut() = Some(inputmode);
             }
             Err(_) => {}
         }
@@ -233,8 +288,22 @@ impl ITfTextInputProcessor_Impl for TryCodeTextService_Impl {
             if let Some(ref button) = *self.langbar_button.borrow() {
                 let _ = language_bar::remove_langbar_button(thread_mgr, button);
             }
+            if let Some(ref button) = *self.langbar_inputmode.borrow() {
+                let _ = language_bar::remove_langbar_button(thread_mgr, button);
+            }
         }
         *self.langbar_button.borrow_mut() = None;
+        *self.langbar_inputmode.borrow_mut() = None;
+
+        // ITfFunctionProvider の解除
+        if let Some(ref thread_mgr) = *self.thread_mgr.borrow() {
+            unsafe {
+                if let Ok(source) = thread_mgr.cast::<ITfSourceSingle>() {
+                    let tid = *self.client_id.borrow();
+                    let _ = source.UnadviseSingleSink(tid, &ITfFunctionProvider::IID);
+                }
+            }
+        }
 
         // キーイベントシンクの解除
         if let Some(ref thread_mgr) = *self.thread_mgr.borrow() {

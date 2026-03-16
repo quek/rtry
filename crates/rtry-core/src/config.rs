@@ -14,6 +14,13 @@ pub struct Config {
     pub history_max_size: usize,
     /// 句読点スタイル (true: 、。 false: ，．)
     pub use_japanese_punctuation: bool,
+    /// IME ONインジケーターを表示するか
+    #[serde(default = "default_true")]
+    pub show_ime_indicator: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -23,6 +30,7 @@ impl Default for Config {
             key_layout: "QWERTY-JIS".to_string(),
             history_max_size: 100,
             use_japanese_punctuation: true,
+            show_ime_indicator: true,
         }
     }
 }

@@ -84,7 +84,7 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
         }
 
         // IMEオフならパススルー
-        if !*self.is_open.borrow() {
+        if !self.is_open.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(FALSE);
         }
 
@@ -159,13 +159,11 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
     ) -> Result<BOOL> {
         // IMEオン/オフトグル
         if is_toggle_key(wparam) {
-            let was_open = {
-                let mut is_open = self.is_open.borrow_mut();
-                let was = *is_open;
-                *is_open = !was;
-                was
-            };
+            let was_open = self.is_open.load(std::sync::atomic::Ordering::Relaxed);
+            self.is_open.store(!was_open, std::sync::atomic::Ordering::Relaxed);
             crate::debug_log!("IME toggled: {} -> {}", was_open, !was_open);
+            // 言語バーアイコンを更新
+            self.notify_langbar_update();
             // オフにするときはエンジンとコンポジションをリセット
             if was_open {
                 if let Some(ref mut engine) = *self.engine.borrow_mut() {
@@ -184,7 +182,7 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
         }
 
         // IMEオフならパススルー
-        if !*self.is_open.borrow() {
+        if !self.is_open.load(std::sync::atomic::Ordering::Relaxed) {
             return Ok(FALSE);
         }
 
