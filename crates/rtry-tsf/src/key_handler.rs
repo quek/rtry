@@ -420,14 +420,32 @@ impl TryCodeTextService_Impl {
         let vk = wparam.0 as u32;
 
         match vk {
-            // Space: 次候補
-            0x20 => {
+            // Space: 次候補 / PgDn: 次ページ / PgUp: 前ページ
+            0x20 | 0x22 | 0x21 => {
                 let (text, selected, candidates, is_postbuf) = {
                     let mut guard = self.mazegaki_state.lock().unwrap();
                     let Some(ref mut state) = *guard else {
                         return Ok(TRUE);
                     };
-                    state.selected = (state.selected + 1) % state.candidates.len();
+                    let len = state.candidates.len();
+                    state.selected = match vk {
+                        // Space: 次候補
+                        0x20 => (state.selected + 1) % len,
+                        // PgDn: 次ページ先頭
+                        0x22 => {
+                            let page = state.selected / 9;
+                            let total_pages = (len + 8) / 9;
+                            let next_page = if page + 1 < total_pages { page + 1 } else { 0 };
+                            (next_page * 9).min(len - 1)
+                        }
+                        // PgUp: 前ページ先頭
+                        _ => {
+                            let page = state.selected / 9;
+                            let total_pages = (len + 8) / 9;
+                            let prev_page = if page > 0 { page - 1 } else { total_pages - 1 };
+                            (prev_page * 9).min(len - 1)
+                        }
+                    };
                     (
                         state.candidates[state.selected].clone(),
                         state.selected,
@@ -451,14 +469,16 @@ impl TryCodeTextService_Impl {
                 self.do_mazegaki_cancel(context)?;
                 Ok(TRUE)
             }
-            // 1-9: 番号選択で確定
+            // 1-9: 現在ページ内の番号選択で確定
             0x31..=0x39 => {
-                let index = (vk - 0x31) as usize;
+                let offset_in_page = (vk - 0x31) as usize;
                 {
                     let mut guard = self.mazegaki_state.lock().unwrap();
                     if let Some(ref mut state) = *guard {
-                        if index < state.candidates.len() {
-                            state.selected = index;
+                        let page_start = (state.selected / 9) * 9;
+                        let abs_index = page_start + offset_in_page;
+                        if abs_index < state.candidates.len() {
+                            state.selected = abs_index;
                         }
                     }
                 }
