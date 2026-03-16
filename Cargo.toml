@@ -23,6 +23,9 @@ windows = { version = "0.62", features = [
     "Win32_System_Variant",
     "Win32_UI_Controls",
     "Win32_UI_Shell",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
 ] }
 windows-core = "0.62"
 serde = { version = "1", features = ["derive"] }

@@ -9,7 +9,10 @@ use rtry_core::table::QWERTY_KEYS;
 use windows::core::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::Security::*;
+use windows::Win32::Security::Authorization::*;
 use windows::Win32::System::LibraryLoader::*;
+use windows::Win32::System::Threading::*;
 use windows::Win32::UI::Controls::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -381,7 +384,102 @@ unsafe fn save_config(hwnd: HWND) -> bool {
         }
 
         let _ = config.save();
+        set_config_dacl();
         true
+    }
+}
+
+/// 現在のユーザー SID を文字列で取得（CorvusSKK の GetUserSid 相当）
+fn get_user_sid() -> Option<String> {
+    unsafe {
+        let mut token = HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).ok()?;
+
+        let result = (|| -> Option<String> {
+            // まずバッファサイズを取得
+            let mut len = 0u32;
+            let _ = GetTokenInformation(token, TokenUser, None, 0, &mut len);
+
+            let mut buf = vec![0u8; len as usize];
+            GetTokenInformation(
+                token,
+                TokenUser,
+                Some(buf.as_mut_ptr() as *mut c_void),
+                len,
+                &mut len,
+            )
+            .ok()?;
+
+            let token_user = &*(buf.as_ptr() as *const TOKEN_USER);
+            let mut sid_str = PWSTR::null();
+            ConvertSidToStringSidW(token_user.User.Sid, &mut sid_str).ok()?;
+            let s = sid_str.to_string().ok();
+            LocalFree(Some(HLOCAL(sid_str.0 as *mut c_void)));
+            s
+        })();
+
+        let _ = CloseHandle(token);
+        result
+    }
+}
+
+/// ファイル/ディレクトリに AppContainer 読み取り ACL を設定（CorvusSKK の SetFileDacl 相当）
+///
+/// SDDL: AC=ALL_APP_PACKAGES(FR), RC=RESTRICTED_CODE(FR), SY=LOCAL_SYSTEM(FA),
+///        BA=BUILTIN_ADMINISTRATORS(FA), UserSid(FA)
+fn set_file_dacl(path: &str, user_sid: &str) -> bool {
+    let sddl = format!(
+        "D:(A;;FR;;;AC)(A;;FR;;;RC)(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})",
+        user_sid
+    );
+    let sddl_w = HSTRING::from(sddl);
+
+    unsafe {
+        let mut psd = PSECURITY_DESCRIPTOR::default();
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            &sddl_w,
+            SDDL_REVISION_1,
+            &mut psd,
+            None,
+        )
+        .is_err()
+        {
+            return false;
+        }
+
+        let mut dacl_present = BOOL::default();
+        let mut pdacl: *mut ACL = std::ptr::null_mut();
+        let mut dacl_defaulted = BOOL::default();
+        let ok = GetSecurityDescriptorDacl(psd, &mut dacl_present, &mut pdacl, &mut dacl_defaulted)
+            .is_ok()
+            && dacl_present.as_bool()
+            && SetNamedSecurityInfoW(
+                &HSTRING::from(path),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(pdacl),
+                None,
+            ) == WIN32_ERROR(0);
+
+        LocalFree(Some(HLOCAL(psd.0 as *mut c_void)));
+        ok
+    }
+}
+
+/// config ディレクトリとファイルに AppContainer 読み取り権限を設定
+fn set_config_dacl() {
+    let user_sid = match get_user_sid() {
+        Some(sid) => sid,
+        None => return,
+    };
+    if let Some(dir) = Config::config_dir() {
+        let dir_str = dir.to_string_lossy();
+        set_file_dacl(&dir_str, &user_sid);
+        let file = dir.join("config.json");
+        let file_str = file.to_string_lossy();
+        set_file_dacl(&file_str, &user_sid);
     }
 }
 
