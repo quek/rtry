@@ -40,9 +40,8 @@ fn vk_to_char(wparam: WPARAM) -> Option<char> {
         0x20 => Some(' '),
         0x30..=0x39 => Some((b'0' + (vk - 0x30) as u8) as char),
         0x41..=0x5A => Some((b'a' + (vk - 0x41) as u8) as char),
-        // VK_OEM_1 = ';' (0xBA)
-        // VK_OEM_MINUS = '-' (0xBD) → ';' として扱う（Pの下が-のキーボード対応）
-        0xBA | 0xBD => Some(';'),
+        0xBA => Some(';'), // VK_OEM_1
+        0xBD => Some('-'), // VK_OEM_MINUS
         0xBC => Some(','),
         0xBE => Some('.'),
         0xBF => Some('/'),
@@ -610,7 +609,7 @@ impl TryCodeTextService_Impl {
                     if i > 0 {
                         buf.push('/');
                     }
-                    buf.push_str(&s.to_display_string());
+                    buf.push_str(&s.to_display_string(table.key_layout_40()));
                 }
             }
         }

@@ -50,16 +50,16 @@ pub enum StrokeSequence {
 
 impl StrokeSequence {
     /// 表示用文字列に変換（例: "a → k", "Space → x → y"）
-    pub fn to_display_string(&self) -> String {
+    pub fn to_display_string(&self, keys: &[char; 40]) -> String {
         match self {
             StrokeSequence::TwoStroke(first, second) => {
-                let k1 = QWERTY_KEYS.get(*first).unwrap_or(&'?');
-                let k2 = QWERTY_KEYS.get(*second).unwrap_or(&'?');
+                let k1 = keys.get(*first).unwrap_or(&'?');
+                let k2 = keys.get(*second).unwrap_or(&'?');
                 format!("{} → {}", k1, k2)
             }
             StrokeSequence::ThreeStroke(first, second) => {
-                let k1 = QWERTY_KEYS.get(*first).unwrap_or(&'?');
-                let k2 = QWERTY_KEYS.get(*second).unwrap_or(&'?');
+                let k1 = keys.get(*first).unwrap_or(&'?');
+                let k2 = keys.get(*second).unwrap_or(&'?');
                 format!("Space → {} → {}", k1, k2)
             }
         }
@@ -97,6 +97,8 @@ pub struct TryCodeTable {
     key_index: HashMap<char, usize>,
     /// 逆引きテーブル: 文字 → ストロークシーケンスのリスト
     reverse_map: HashMap<String, Vec<StrokeSequence>>,
+    /// 実際に使用中の40キーレイアウト
+    keys: [char; 40],
 }
 
 impl TryCodeTable {
@@ -127,7 +129,7 @@ impl TryCodeTable {
         }
 
         let reverse_map = Self::build_reverse_map(&base_table, &ext_table);
-        Ok(TryCodeTable { name, key_layout, base_table, ext_table, key_index, reverse_map })
+        Ok(TryCodeTable { name, key_layout, base_table, ext_table, key_index, reverse_map, keys: QWERTY_KEYS })
     }
 
     /// 逆引きテーブルを構築
@@ -188,6 +190,25 @@ impl TryCodeTable {
     /// 文字からストロークシーケンスを逆引き
     pub fn reverse_lookup(&self, ch: &str) -> &[StrokeSequence] {
         self.reverse_map.get(ch).map_or(&[], |v| v.as_slice())
+    }
+
+    /// カスタムキーレイアウトを設定（key_index を再構築）
+    pub fn set_key_layout(&mut self, layout: [char; 40]) {
+        self.keys = layout;
+        self.key_index.clear();
+        for (i, &key) in layout.iter().enumerate() {
+            self.key_index.insert(key, i);
+        }
+    }
+
+    /// インデックスからキー文字を取得
+    pub fn key_at(&self, index: usize) -> Option<char> {
+        self.keys.get(index).copied()
+    }
+
+    /// 現在のキーレイアウトを取得
+    pub fn key_layout_40(&self) -> &[char; 40] {
+        &self.keys
     }
 }
 
@@ -527,7 +548,7 @@ mod tests {
         assert!(!strokes.is_empty(), "ヲ should have strokes");
         assert!(strokes.contains(&StrokeSequence::TwoStroke(0, 10)),
             "ヲ should have TwoStroke(0, 10), got {:?}", strokes);
-        assert_eq!(strokes[0].to_display_string(), "1 → q");
+        assert_eq!(strokes[0].to_display_string(&QWERTY_KEYS), "1 → q");
 
         // 存在しない文字
         let strokes = table.reverse_lookup("㍻");

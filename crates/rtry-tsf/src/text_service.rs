@@ -118,9 +118,12 @@ impl TryCodeTextService {
         for path in paths.into_iter().flatten() {
             if path.exists() {
                 match TryCodeTable::load(&path) {
-                    Ok(table) => {
+                    Ok(mut table) => {
                         crate::debug_log!("Loaded try-code table from {:?}", path);
                         crate::debug_log!("ext_prefix_key: {:?}", config.ext_prefix_key);
+                        let key_layout = config.effective_key_layout();
+                        crate::debug_log!("key_layout: {:?}", key_layout);
+                        table.set_key_layout(key_layout);
                         *self.engine.borrow_mut() = Some(Engine::with_prefix_key(table, config.ext_prefix_key));
                         return;
                     }

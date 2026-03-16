@@ -128,7 +128,7 @@ impl Engine {
 
         // プレフィックスキーが第2打鍵の場合、第1打鍵のキー文字を出力
         if key == self.ext_prefix_key {
-            if let Some(&ch) = crate::table::QWERTY_KEYS.get(first) {
+            if let Some(ch) = self.table.key_at(first) {
                 return EngineOutput::Commit(ch.to_string());
             }
             return EngineOutput::Clear;
@@ -136,7 +136,7 @@ impl Engine {
 
         let Some(second) = self.table.key_to_index(key) else {
             // 無効なキー: 第1打鍵のキー文字を出力してリセット
-            return if let Some(&ch) = crate::table::QWERTY_KEYS.get(first) {
+            return if let Some(ch) = self.table.key_at(first) {
                 EngineOutput::Commit(ch.to_string())
             } else {
                 EngineOutput::Clear

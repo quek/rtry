@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::table::QWERTY_KEYS;
+
 /// アプリケーション設定
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -20,6 +22,9 @@ pub struct Config {
     /// 3ストローク入力のプレフィックスキー（デフォルト: Space）
     #[serde(default = "default_space")]
     pub ext_prefix_key: char,
+    /// カスタム40キーレイアウト（None の場合は QWERTY_KEYS を使用）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_layout_40: Option<Vec<char>>,
 }
 
 fn default_true() -> bool {
@@ -39,6 +44,7 @@ impl Default for Config {
             use_japanese_punctuation: true,
             show_ime_indicator: true,
             ext_prefix_key: ' ',
+            key_layout_40: None,
         }
     }
 }
@@ -87,5 +93,17 @@ impl Config {
         let content = serde_json::to_string_pretty(self)?;
         std::fs::write(path, content)?;
         Ok(())
+    }
+
+    /// 有効なキーレイアウトを取得（カスタム設定がなければ QWERTY_KEYS）
+    pub fn effective_key_layout(&self) -> [char; 40] {
+        if let Some(ref layout) = self.key_layout_40 {
+            if layout.len() == 40 {
+                let mut arr = [' '; 40];
+                arr.copy_from_slice(layout);
+                return arr;
+            }
+        }
+        QWERTY_KEYS
     }
 }

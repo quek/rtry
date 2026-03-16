@@ -4,6 +4,7 @@ use std::ffi::c_void;
 use std::mem;
 
 use rtry_core::config::Config;
+use rtry_core::table::QWERTY_KEYS;
 
 use windows::core::*;
 use windows::Win32::Foundation::*;
@@ -13,14 +14,16 @@ use windows::Win32::UI::Controls::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 const WINDOW_CLASS: PCWSTR = w!("RtryConfigWindow");
-const WINDOW_WIDTH: i32 = 320;
-const WINDOW_HEIGHT: i32 = 200;
+const WINDOW_WIDTH: i32 = 340;
+const WINDOW_HEIGHT: i32 = 340;
 
 const ID_INDICATOR_CHECK: i32 = 101;
 const ID_OK: i32 = 102;
 const ID_CANCEL: i32 = 103;
 const ID_PREFIX_KEY_LABEL: i32 = 104;
 const ID_PREFIX_KEY_EDIT: i32 = 105;
+const ID_KEY_LAYOUT_LABEL: i32 = 106;
+const ID_KEY_LAYOUT_EDIT: i32 = 107;
 
 fn main() {
     let config = Config::load();
@@ -87,6 +90,26 @@ unsafe fn get_system_font() -> HFONT {
     }
 }
 
+/// 等幅フォントを取得
+unsafe fn get_monospace_font() -> HFONT {
+    unsafe {
+        CreateFontW(
+            16,     // height
+            0,      // width
+            0,      // escapement
+            0,      // orientation
+            FW_NORMAL.0 as i32,
+            0, 0, 0, // italic, underline, strikeout
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            DEFAULT_QUALITY,
+            (FF_MODERN.0 | FIXED_PITCH.0) as u32,
+            w!("Consolas"),
+        )
+    }
+}
+
 /// 子コントロールにフォントを設定
 unsafe fn set_font(hwnd: HWND, hfont: HFONT) {
     unsafe {
@@ -99,11 +122,54 @@ unsafe fn set_font(hwnd: HWND, hfont: HFONT) {
     }
 }
 
+/// キーレイアウトを表示用文字列に変換（4行×10列、スペース区切り）
+fn key_layout_to_string(keys: &[char; 40]) -> String {
+    let mut s = String::new();
+    for row in 0..4 {
+        if row > 0 {
+            s.push_str("\r\n");
+        }
+        for col in 0..10 {
+            if col > 0 {
+                s.push(' ');
+            }
+            s.push(keys[row * 10 + col]);
+        }
+    }
+    s
+}
+
+/// 表示用文字列からキーレイアウトをパース
+fn parse_key_layout(text: &str) -> Option<[char; 40]> {
+    let chars: Vec<char> = text
+        .split(|c: char| c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| {
+            let mut chars = s.chars();
+            let ch = chars.next()?;
+            if chars.next().is_some() {
+                None // 2文字以上のトークンは無効
+            } else {
+                Some(ch)
+            }
+        })
+        .collect();
+
+    if chars.len() != 40 {
+        return None;
+    }
+
+    let mut arr = [' '; 40];
+    arr.copy_from_slice(&chars);
+    Some(arr)
+}
+
 /// コントロールを作成
 unsafe fn create_controls(hwnd: HWND, config: &Config) {
     unsafe {
         let instance = HINSTANCE(GetWindowLongPtrW(hwnd, GWL_HINSTANCE) as *mut _);
         let hfont = get_system_font();
+        let mono_font = get_monospace_font();
 
         // チェックボックス: IME ONインジケーターを表示
         let check = CreateWindowExW(
@@ -175,6 +241,50 @@ unsafe fn create_controls(hwnd: HWND, config: &Config) {
             let _ = SetWindowTextW(edit, &text);
         }
 
+        // ラベル: キーレイアウト
+        let layout_label = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("STATIC"),
+            w!("キーレイアウト (4行×10列):"),
+            WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0),
+            20,
+            88,
+            260,
+            24,
+            Some(hwnd),
+            Some(HMENU(ID_KEY_LAYOUT_LABEL as *mut _)),
+            Some(instance),
+            None,
+        )
+        .expect("CreateWindowExW layout label failed");
+        set_font(layout_label, hfont);
+
+        // マルチラインテキスト: キーレイアウト
+        let layout_text = key_layout_to_string(&config.effective_key_layout());
+        let layout_edit = CreateWindowExW(
+            WS_EX_CLIENTEDGE,
+            w!("EDIT"),
+            &HSTRING::from(layout_text),
+            WINDOW_STYLE(
+                WS_CHILD.0
+                    | WS_VISIBLE.0
+                    | WS_TABSTOP.0
+                    | WS_VSCROLL.0
+                    | ES_MULTILINE as u32
+                    | ES_WANTRETURN as u32,
+            ),
+            20,
+            112,
+            295,
+            80,
+            Some(hwnd),
+            Some(HMENU(ID_KEY_LAYOUT_EDIT as *mut _)),
+            Some(instance),
+            None,
+        )
+        .expect("CreateWindowExW layout edit failed");
+        set_font(layout_edit, mono_font);
+
         // OKボタン
         let ok_btn = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
@@ -182,7 +292,7 @@ unsafe fn create_controls(hwnd: HWND, config: &Config) {
             w!("OK"),
             WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | WS_TABSTOP.0 | BS_DEFPUSHBUTTON as u32),
             100,
-            115,
+            210,
             80,
             30,
             Some(hwnd),
@@ -200,7 +310,7 @@ unsafe fn create_controls(hwnd: HWND, config: &Config) {
             w!("キャンセル"),
             WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | WS_TABSTOP.0),
             190,
-            115,
+            210,
             80,
             30,
             Some(hwnd),
@@ -213,12 +323,12 @@ unsafe fn create_controls(hwnd: HWND, config: &Config) {
     }
 }
 
-/// コントロールから設定を読み取って保存
-unsafe fn save_config(hwnd: HWND) {
+/// コントロールから設定を読み取って保存。成功時 true、バリデーション失敗時 false
+unsafe fn save_config(hwnd: HWND) -> bool {
     unsafe {
         let config_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Config;
         if config_ptr.is_null() {
-            return;
+            return false;
         }
         let config = &mut *config_ptr;
 
@@ -244,7 +354,34 @@ unsafe fn save_config(hwnd: HWND) {
             }
         }
 
+        // キーレイアウトの読み取り
+        let layout_edit = GetDlgItem(Some(hwnd), ID_KEY_LAYOUT_EDIT);
+        if let Ok(layout_edit) = layout_edit {
+            let mut buf = [0u16; 256];
+            let len = GetWindowTextW(layout_edit, &mut buf);
+            if len > 0 {
+                let text = String::from_utf16_lossy(&buf[..len as usize]);
+                if let Some(layout) = parse_key_layout(&text) {
+                    if layout == QWERTY_KEYS {
+                        config.key_layout_40 = None;
+                    } else {
+                        config.key_layout_40 = Some(layout.to_vec());
+                    }
+                } else {
+                    // パース失敗時はエラーメッセージを表示
+                    let _ = MessageBoxW(
+                        Some(hwnd),
+                        w!("キーレイアウトは4行×10列の1文字ずつスペース区切りで入力してください。"),
+                        w!("入力エラー"),
+                        MB_OK | MB_ICONWARNING,
+                    );
+                    return false;
+                }
+            }
+        }
+
         let _ = config.save();
+        true
     }
 }
 
@@ -267,8 +404,9 @@ unsafe extern "system" fn wnd_proc(
                 let id = (wparam.0 & 0xFFFF) as i32;
                 match id {
                     ID_OK => {
-                        save_config(hwnd);
-                        let _ = DestroyWindow(hwnd);
+                        if save_config(hwnd) {
+                            let _ = DestroyWindow(hwnd);
+                        }
                     }
                     ID_CANCEL => {
                         let _ = DestroyWindow(hwnd);

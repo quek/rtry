@@ -284,8 +284,9 @@ impl ITfEditSession_Impl for CharHelpEditSession_Impl {
                 let msg = format!("「{}」 ストロークなし", ch);
                 crate::stroke_help::show_stroke_help(&msg);
             } else {
+                let keys = self.table.key_layout_40();
                 let stroke_strs: Vec<String> = strokes.iter()
-                    .map(|s| s.to_display_string())
+                    .map(|s| s.to_display_string(keys))
                     .collect();
                 let msg = format!("「{}」 {}", ch, stroke_strs.join(" / "));
                 crate::debug_log!("CharHelp: '{}' → {}", ch, msg);
