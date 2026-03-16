@@ -121,18 +121,25 @@ pub fn update_selected(selected: usize) {
     if raw != 0 {
         unsafe {
             let hwnd = HWND(raw as *mut _);
-            let data = CAND_DATA.lock().unwrap();
-            if let Some(ref data) = *data {
-                let page = selected / PAGE_SIZE;
-                let page_start = page * PAGE_SIZE;
-                let page_candidates =
-                    &data.candidates[page_start..data.candidates.len().min(page_start + PAGE_SIZE)];
-                let total_pages = (data.candidates.len() + PAGE_SIZE - 1) / PAGE_SIZE;
-                let count = page_candidates.len() as i32;
-                let indicator_height = if total_pages > 1 { LINE_HEIGHT } else { 0 };
-                let width =
-                    calc_page_width(page_candidates, page_start) + PADDING_X * 2 + 40;
-                let height = count * LINE_HEIGHT + PADDING_Y * 2 + indicator_height;
+            // ロックを保持したままウィンドウ操作を行うと、UpdateWindow → WM_PAINT →
+            // CAND_DATA.lock() でデッドロックするため、先にサイズを計算してロックを解放する
+            let size = {
+                let data = CAND_DATA.lock().unwrap();
+                data.as_ref().map(|data| {
+                    let page = selected / PAGE_SIZE;
+                    let page_start = page * PAGE_SIZE;
+                    let page_candidates = &data.candidates
+                        [page_start..data.candidates.len().min(page_start + PAGE_SIZE)];
+                    let total_pages = (data.candidates.len() + PAGE_SIZE - 1) / PAGE_SIZE;
+                    let count = page_candidates.len() as i32;
+                    let indicator_height = if total_pages > 1 { LINE_HEIGHT } else { 0 };
+                    let width =
+                        calc_page_width(page_candidates, page_start) + PADDING_X * 2 + 40;
+                    let height = count * LINE_HEIGHT + PADDING_Y * 2 + indicator_height;
+                    (width, height)
+                })
+            };
+            if let Some((width, height)) = size {
                 let _ = SetWindowPos(
                     hwnd,
                     None,
