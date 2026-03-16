@@ -294,8 +294,11 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
             EngineOutput::PassThrough => Ok(FALSE),
             EngineOutput::SpecialAction(func) => {
                 match func {
-                    SpecialFunction::CharHelp(_) => {
+                    SpecialFunction::CharHelp(true) => {
                         self.do_char_help(&context)?;
+                    }
+                    SpecialFunction::CharHelp(false) => {
+                        crate::stroke_help::reshow_last_help();
                     }
                     SpecialFunction::MazegakiConvert => {
                         self.do_mazegaki_start(&context)?;

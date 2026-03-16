@@ -537,6 +537,12 @@ mod tests {
         let entry_55 = &table.base_table[4][4];
         assert_eq!(*entry_55, TableEntry::Special(SpecialFunction::CharHelp(true)),
             "base_table[4][4] (55) should be CharHelp(true), got {:?}", entry_55);
+
+        // try.tbl: 44 = @h = CharHelp(false) （再表示）
+        // key '4' = index 3
+        let entry_44 = &table.base_table[3][3];
+        assert_eq!(*entry_44, TableEntry::Special(SpecialFunction::CharHelp(false)),
+            "base_table[3][3] (44) should be CharHelp(false), got {:?}", entry_44);
     }
 
     #[test]

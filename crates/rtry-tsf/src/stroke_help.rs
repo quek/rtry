@@ -3,6 +3,7 @@
 //! カーソル位置の文字のストローク（打ち方）をポップアップウィンドウで表示する。
 
 use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::Mutex;
 
 use windows::core::*;
 use windows::Win32::Foundation::*;
@@ -12,12 +13,32 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 /// 現在表示中のツールチップウィンドウハンドル（isize で保持して Send 対応）
 static TOOLTIP_HWND: AtomicIsize = AtomicIsize::new(0);
 
+/// 最後に表示したストロークヘルプメッセージ（44で再表示用）
+static LAST_HELP_MSG: Mutex<Option<String>> = Mutex::new(None);
+
 const TOOLTIP_CLASS: PCWSTR = w!("RtryStrokeHelp");
 const TIMER_ID: usize = 1;
 const TOOLTIP_DURATION_MS: u32 = 5000;
 
+/// 最後に表示したヘルプを再表示（44キー用）
+pub fn reshow_last_help() {
+    let Ok(guard) = LAST_HELP_MSG.lock() else { return };
+    let msg = guard.clone();
+    drop(guard);
+    if let Some(msg) = msg {
+        show_stroke_help_inner(&msg);
+    }
+}
+
 /// ツールチップを表示
 pub fn show_stroke_help(text: &str) {
+    if let Ok(mut guard) = LAST_HELP_MSG.lock() {
+        *guard = Some(text.to_string());
+    }
+    show_stroke_help_inner(text);
+}
+
+fn show_stroke_help_inner(text: &str) {
     dismiss();
 
     let text_w: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
