@@ -397,7 +397,7 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
 
             // MazegakiState を結果スロットにセット
             let state = MazegakiState {
-                reading,
+                reading: reading.to_string(),
                 candidates: candidates.to_vec(),
                 selected: 0,
                 postbuf_reading_len: if use_postbuf { Some(reading_len) } else { None },

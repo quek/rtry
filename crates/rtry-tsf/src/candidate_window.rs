@@ -106,6 +106,49 @@ pub fn show_candidates(candidates: &[String], selected: usize) {
     }
 }
 
+/// 選択インデックスのみ更新して再描画（候補リストの clone 不要）
+pub fn update_selected(selected: usize) {
+    {
+        let mut data = CAND_DATA.lock().unwrap();
+        if let Some(ref mut data) = *data {
+            data.selected = selected;
+        } else {
+            return;
+        }
+    }
+
+    let raw = CAND_HWND.load(Ordering::SeqCst);
+    if raw != 0 {
+        unsafe {
+            let hwnd = HWND(raw as *mut _);
+            let data = CAND_DATA.lock().unwrap();
+            if let Some(ref data) = *data {
+                let page = selected / PAGE_SIZE;
+                let page_start = page * PAGE_SIZE;
+                let page_candidates =
+                    &data.candidates[page_start..data.candidates.len().min(page_start + PAGE_SIZE)];
+                let total_pages = (data.candidates.len() + PAGE_SIZE - 1) / PAGE_SIZE;
+                let count = page_candidates.len() as i32;
+                let indicator_height = if total_pages > 1 { LINE_HEIGHT } else { 0 };
+                let width =
+                    calc_page_width(page_candidates, page_start) + PADDING_X * 2 + 40;
+                let height = count * LINE_HEIGHT + PADDING_Y * 2 + indicator_height;
+                let _ = SetWindowPos(
+                    hwnd,
+                    None,
+                    0,
+                    0,
+                    width,
+                    height,
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+            let _ = InvalidateRect(Some(hwnd), None, true);
+            let _ = UpdateWindow(hwnd);
+        }
+    }
+}
+
 /// 候補ウィンドウを閉じる
 pub fn dismiss() {
     let raw = CAND_HWND.swap(0, Ordering::SeqCst);

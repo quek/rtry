@@ -422,7 +422,7 @@ impl TryCodeTextService_Impl {
         match vk {
             // Space: 次候補 / PgDn: 次ページ / PgUp: 前ページ
             0x20 | 0x22 | 0x21 => {
-                let (text, selected, candidates, is_postbuf) = {
+                let (text, selected, is_postbuf) = {
                     let mut guard = self.mazegaki_state.lock().unwrap();
                     let Some(ref mut state) = *guard else {
                         return Ok(TRUE);
@@ -449,14 +449,13 @@ impl TryCodeTextService_Impl {
                     (
                         state.candidates[state.selected].clone(),
                         state.selected,
-                        state.candidates.clone(),
                         state.postbuf_reading_len.is_some(),
                     )
                 };
                 if !is_postbuf {
                     self.do_mazegaki_update(context, &text)?;
                 }
-                crate::candidate_window::show_candidates(&candidates, selected);
+                crate::candidate_window::update_selected(selected);
                 Ok(TRUE)
             }
             // Enter: 確定
@@ -554,6 +553,8 @@ impl TryCodeTextService_Impl {
 
     /// 交ぜ書き確定後にストロークヘルプを表示
     fn show_mazegaki_stroke_help(&self, text: &str) {
+        use std::fmt::Write;
+
         let table = {
             let engine_ref = self.engine.borrow();
             let Some(ref engine) = *engine_ref else {
@@ -562,22 +563,27 @@ impl TryCodeTextService_Impl {
             engine.table()
         };
 
-        let mut parts = Vec::new();
+        let mut buf = String::new();
         for ch in text.chars() {
+            if !buf.is_empty() {
+                buf.push_str("  ");
+            }
             let s = ch.to_string();
             let strokes = table.reverse_lookup(&s);
             if strokes.is_empty() {
-                parts.push(format!("{}:?", ch));
+                let _ = write!(buf, "{}:?", ch);
             } else {
-                let stroke_strs: Vec<String> = strokes.iter()
-                    .map(|s| s.to_display_string())
-                    .collect();
-                parts.push(format!("{}:{}", ch, stroke_strs.join("/")));
+                let _ = write!(buf, "{}:", ch);
+                for (i, s) in strokes.iter().enumerate() {
+                    if i > 0 {
+                        buf.push('/');
+                    }
+                    buf.push_str(&s.to_display_string());
+                }
             }
         }
-        if !parts.is_empty() {
-            let msg = parts.join("  ");
-            crate::stroke_help::show_stroke_help(&msg);
+        if !buf.is_empty() {
+            crate::stroke_help::show_stroke_help(&buf);
         }
     }
 

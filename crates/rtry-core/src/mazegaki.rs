@@ -81,15 +81,26 @@ impl MazegakiDictionary {
     /// テキスト末尾から最長一致検索
     ///
     /// 戻り値: (読みの文字数, 読み, 候補リストの参照)
-    pub fn find_longest_match(&self, text: &str) -> Option<(usize, String, &[String])> {
-        let chars: Vec<char> = text.chars().collect();
-        let max_len = chars.len().min(self.max_reading_len);
+    pub fn find_longest_match<'a>(&'a self, text: &'a str) -> Option<(usize, &'a str, &'a [String])> {
+        // char_indices で末尾からのバイト境界を収集（最大 max_reading_len 文字分）
+        let char_count = text.chars().count();
+        let max_len = char_count.min(self.max_reading_len);
 
-        // 長い方から試す
-        for len in (1..=max_len).rev() {
-            let reading: String = chars[chars.len() - len..].iter().collect();
-            if let Some(candidates) = self.entries.get(&reading) {
-                return Some((len, reading, candidates));
+        // 末尾から各文字境界のバイトオフセットを集める
+        let mut boundaries: Vec<usize> = text
+            .char_indices()
+            .rev()
+            .take(max_len)
+            .map(|(i, _)| i)
+            .collect();
+        boundaries.reverse();
+
+        // 長い方（boundaries の先頭 = より前の位置）から試す
+        for &byte_offset in &boundaries {
+            let reading = &text[byte_offset..];
+            if let Some(candidates) = self.entries.get(reading) {
+                let reading_chars = char_count - text[..byte_offset].chars().count();
+                return Some((reading_chars, reading, candidates));
             }
         }
         None
