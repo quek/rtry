@@ -107,9 +107,37 @@ impl TryCodeTextService {
         }
     }
 
+    /// config.json を DLL ディレクトリ → %APPDATA% の順で探して読み込み
+    fn load_config() -> rtry_core::config::Config {
+        let paths = [
+            Self::dll_dir_path().map(|p| p.join("config.json")),
+            rtry_core::config::Config::config_path(),
+        ];
+        for path in paths.into_iter().flatten() {
+            if path.exists() {
+                if let Ok(config) = rtry_core::config::Config::load_from(&path) {
+                    crate::debug_log!("Loaded config from {:?}", path);
+                    return config;
+                }
+            }
+        }
+        crate::debug_log!("No config.json found, using defaults");
+        rtry_core::config::Config::default()
+    }
+
+    /// DLL のあるディレクトリのパス
+    fn dll_dir_path() -> Option<std::path::PathBuf> {
+        use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
+        let mut buf = vec![0u16; 260];
+        let len = unsafe { GetModuleFileNameW(Some(crate::dll_module()), &mut buf) } as usize;
+        if len == 0 { return None; }
+        let dll_path = String::from_utf16_lossy(&buf[..len]);
+        std::path::PathBuf::from(dll_path).parent().map(|p| p.to_path_buf())
+    }
+
     /// テーブルファイルを探してエンジンを初期化
     fn init_engine(&self) {
-        let config = rtry_core::config::Config::load();
+        let config = Self::load_config();
         let paths = [
             Self::dll_dir_table_path(),
             Self::appdata_table_path(),
@@ -138,13 +166,7 @@ impl TryCodeTextService {
     }
 
     fn dll_dir_table_path() -> Option<std::path::PathBuf> {
-        use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
-        let mut buf = vec![0u16; 260];
-        let len = unsafe { GetModuleFileNameW(Some(crate::dll_module()), &mut buf) } as usize;
-        if len == 0 { return None; }
-        let dll_path = String::from_utf16_lossy(&buf[..len]);
-        let path = std::path::PathBuf::from(dll_path);
-        path.parent().map(|p| p.join("try.tbl"))
+        Self::dll_dir_path().map(|p| p.join("try.tbl"))
     }
 
     fn appdata_table_path() -> Option<std::path::PathBuf> {
@@ -153,13 +175,7 @@ impl TryCodeTextService {
     }
 
     fn dll_dir_mazegaki_path() -> Option<std::path::PathBuf> {
-        use windows::Win32::System::LibraryLoader::GetModuleFileNameW;
-        let mut buf = vec![0u16; 260];
-        let len = unsafe { GetModuleFileNameW(Some(crate::dll_module()), &mut buf) } as usize;
-        if len == 0 { return None; }
-        let dll_path = String::from_utf16_lossy(&buf[..len]);
-        let path = std::path::PathBuf::from(dll_path);
-        path.parent().map(|p| p.join("mazegaki.dic"))
+        Self::dll_dir_path().map(|p| p.join("mazegaki.dic"))
     }
 
     fn appdata_mazegaki_path() -> Option<std::path::PathBuf> {

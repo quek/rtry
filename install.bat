@@ -42,6 +42,13 @@ if exist "%DIC_SRC%" (
     echo [OK] mazegaki.dic copied to %INSTALL_DIR%\mazegaki.dic
 )
 
+:: Copy config.json if it exists (for AppContainer apps like Claude)
+set CONFIG_SRC=%APPDATA%\rtry\config.json
+if exist "%CONFIG_SRC%" (
+    copy /y "%CONFIG_SRC%" "%INSTALL_DIR%\config.json" >nul
+    echo [OK] config.json copied to %INSTALL_DIR%\config.json
+)
+
 :: Copy config tool
 set BUILD_CONFIG=%~dp0target\release\rtry-config.exe
 if exist "%BUILD_CONFIG%" (

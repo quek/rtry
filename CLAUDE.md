@@ -24,6 +24,7 @@ T-Code を拡張した Try-Code の Windows IME。Rust で TSF (Text Services Fr
   - `rtry_tsf.dll` - IME 本体
   - `try.tbl` - 変換テーブル
   - `mazegaki.dic` - 交ぜ書き辞書
+  - `config.json` - 設定ファイル（`install.bat` が `%APPDATA%\rtry\config.json` からコピー）
   - `debug.log` - デバッグログ
 - DLL はビルド成果物を `install.bat` で `C:\Program Files\rtry\` にコピーして `regsvr32` で登録
 - プロファイル登録は `ITfInputProcessorProfileMgr::RegisterProfile`（`bEnabledByDefault: true`）
@@ -162,7 +163,8 @@ TSFの`GetText`で既存テキストを読み取れない（`ShiftStart`=0, `Get
 ## AppContainer 対応（スタートメニュー検索等）
 - SearchHost.exe 等の AppContainer プロセスは `%APPDATA%` にアクセスできない
 - DLL・データファイルは `C:\Program Files\rtry\` に配置（AppContainer からデフォルトで読み取り可能）
-- データファイル検索順: DLL と同じディレクトリ → `%APPDATA%\rtry\`（フォールバック）
+- データファイル・設定ファイル検索順: DLL と同じディレクトリ → `%APPDATA%\rtry\`（フォールバック）
+- `install.bat` が `%APPDATA%\rtry\config.json` を DLL ディレクトリにコピー（AppContainer 対応）
 - デバッグログも DLL ディレクトリに出力（`C:\Program Files\rtry\debug.log`）
 
 ## 未実装機能
