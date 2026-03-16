@@ -14,11 +14,13 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 const WINDOW_CLASS: PCWSTR = w!("RtryConfigWindow");
 const WINDOW_WIDTH: i32 = 320;
-const WINDOW_HEIGHT: i32 = 150;
+const WINDOW_HEIGHT: i32 = 200;
 
 const ID_INDICATOR_CHECK: i32 = 101;
 const ID_OK: i32 = 102;
 const ID_CANCEL: i32 = 103;
+const ID_PREFIX_KEY_LABEL: i32 = 104;
+const ID_PREFIX_KEY_EDIT: i32 = 105;
 
 fn main() {
     let config = Config::load();
@@ -125,6 +127,54 @@ unsafe fn create_controls(hwnd: HWND, config: &Config) {
             SendMessageW(check, BM_SETCHECK, Some(WPARAM(BST_CHECKED.0 as usize)), None);
         }
 
+        // ラベル: 3ストロークプレフィックスキー
+        let label = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("STATIC"),
+            w!("3ストロークプレフィックスキー:"),
+            WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0),
+            20,
+            54,
+            210,
+            24,
+            Some(hwnd),
+            Some(HMENU(ID_PREFIX_KEY_LABEL as *mut _)),
+            Some(instance),
+            None,
+        )
+        .expect("CreateWindowExW label failed");
+        set_font(label, hfont);
+
+        // テキスト入力: プレフィックスキー（1文字）
+        let prefix_text = if config.ext_prefix_key == ' ' {
+            "Space"
+        } else {
+            // 1文字を静的文字列にはできないのでウィンドウ作成後にセット
+            ""
+        };
+        let edit = CreateWindowExW(
+            WS_EX_CLIENTEDGE,
+            w!("EDIT"),
+            &HSTRING::from(prefix_text),
+            WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | WS_TABSTOP.0 | ES_AUTOHSCROLL as u32),
+            232,
+            52,
+            60,
+            24,
+            Some(hwnd),
+            Some(HMENU(ID_PREFIX_KEY_EDIT as *mut _)),
+            Some(instance),
+            None,
+        )
+        .expect("CreateWindowExW edit failed");
+        set_font(edit, hfont);
+
+        // Space 以外の1文字の場合はセット
+        if config.ext_prefix_key != ' ' {
+            let text = HSTRING::from(config.ext_prefix_key.to_string());
+            let _ = SetWindowTextW(edit, &text);
+        }
+
         // OKボタン
         let ok_btn = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
@@ -132,7 +182,7 @@ unsafe fn create_controls(hwnd: HWND, config: &Config) {
             w!("OK"),
             WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | WS_TABSTOP.0 | BS_DEFPUSHBUTTON as u32),
             100,
-            70,
+            115,
             80,
             30,
             Some(hwnd),
@@ -150,7 +200,7 @@ unsafe fn create_controls(hwnd: HWND, config: &Config) {
             w!("キャンセル"),
             WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | WS_TABSTOP.0),
             190,
-            70,
+            115,
             80,
             30,
             Some(hwnd),
@@ -176,6 +226,22 @@ unsafe fn save_config(hwnd: HWND) {
         if let Ok(check) = check {
             let state = SendMessageW(check, BM_GETCHECK, None, None);
             config.show_ime_indicator = state.0 == BST_CHECKED.0 as isize;
+        }
+
+        // プレフィックスキーの読み取り
+        let edit = GetDlgItem(Some(hwnd), ID_PREFIX_KEY_EDIT);
+        if let Ok(edit) = edit {
+            let mut buf = [0u16; 16];
+            let len = GetWindowTextW(edit, &mut buf);
+            if len > 0 {
+                let text = String::from_utf16_lossy(&buf[..len as usize]);
+                let text = text.trim();
+                if text.eq_ignore_ascii_case("space") {
+                    config.ext_prefix_key = ' ';
+                } else if let Some(ch) = text.chars().next() {
+                    config.ext_prefix_key = ch;
+                }
+            }
         }
 
         let _ = config.save();

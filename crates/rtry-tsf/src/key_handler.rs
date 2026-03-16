@@ -33,7 +33,7 @@ fn is_toggle_key(wparam: WPARAM) -> bool {
     (vk == VK_OEM_3.0 as u32 && is_alt_pressed()) || vk == VK_KANJI.0 as u32
 }
 
-/// 仮想キーコード (WPARAM) を文字に変換
+/// 仮想キーコード (WPARAM) を T-Code 40キー配列の文字に変換
 fn vk_to_char(wparam: WPARAM) -> Option<char> {
     let vk = wparam.0 as u32;
     match vk {
@@ -48,6 +48,20 @@ fn vk_to_char(wparam: WPARAM) -> Option<char> {
         0xBF => Some('/'),
         _ => None,
     }
+}
+
+/// 仮想キーコードを文字に変換（MapVirtualKeyW によるフォールバック）
+/// T-Code 40キー配列外のキーをプレフィックスキーとして使う場合に使用
+fn vk_to_any_char(wparam: WPARAM) -> Option<char> {
+    vk_to_char(wparam).or_else(|| {
+        let vk = wparam.0 as u32;
+        let mapped = unsafe { MapVirtualKeyW(vk, MAP_VIRTUAL_KEY_TYPE(2)) };
+        if mapped > 0 {
+            char::from_u32(mapped)
+        } else {
+            None
+        }
+    })
 }
 
 /// キーの押下・解放の INPUT ペアを生成する
@@ -118,6 +132,8 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
             return Ok(FALSE);
         };
 
+        let prefix_key = engine.ext_prefix_key();
+
         // ペンディング中の非マップキー処理
         if engine.has_pending_stroke() {
             let vk = wparam.0 as u32;
@@ -125,13 +141,21 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                 // BS: 消費してペンディングを破棄
                 return Ok(TRUE);
             }
-            if vk_to_char(wparam).is_none() {
+            // T-Code キーでもプレフィックスキーでもなければパススルー
+            if vk_to_char(wparam).is_none()
+                && vk_to_any_char(wparam) != Some(prefix_key)
+            {
                 // 非マップキー（矢印、Enter等）: パススルー（OnKeyDownでリセット）
                 return Ok(FALSE);
             }
         }
 
-        let Some(ch) = vk_to_char(wparam) else {
+        // T-Code 40キーまたはプレフィックスキーに変換
+        let ch = vk_to_char(wparam).or_else(|| {
+            let c = vk_to_any_char(wparam)?;
+            (c == prefix_key).then_some(c)
+        });
+        let Some(ch) = ch else {
             return Ok(FALSE);
         };
 
@@ -218,6 +242,8 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                 return Ok(FALSE);
             };
 
+            let prefix_key = engine.ext_prefix_key();
+
             // ペンディング中の非マップキー処理
             if engine.has_pending_stroke() {
                 let vk = wparam.0 as u32;
@@ -227,7 +253,10 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                     engine.reset();
                     return Ok(TRUE);
                 }
-                if vk_to_char(wparam).is_none() {
+                // T-Code キーでもプレフィックスキーでもなければパススルー
+                if vk_to_char(wparam).is_none()
+                    && vk_to_any_char(wparam) != Some(prefix_key)
+                {
                     // 非マップキー: リセットしてパススルー
                     crate::debug_log!("OnKeyDown: non-mapped key resets pending stroke");
                     engine.reset();
@@ -235,7 +264,12 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                 }
             }
 
-            let Some(ch) = vk_to_char(wparam) else {
+            // T-Code 40キーまたはプレフィックスキーに変換
+            let ch = vk_to_char(wparam).or_else(|| {
+                let c = vk_to_any_char(wparam)?;
+                (c == prefix_key).then_some(c)
+            });
+            let Some(ch) = ch else {
                 return Ok(FALSE);
             };
 

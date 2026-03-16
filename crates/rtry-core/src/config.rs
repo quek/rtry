@@ -17,10 +17,17 @@ pub struct Config {
     /// IME ONインジケーターを表示するか
     #[serde(default = "default_true")]
     pub show_ime_indicator: bool,
+    /// 3ストローク入力のプレフィックスキー（デフォルト: Space）
+    #[serde(default = "default_space")]
+    pub ext_prefix_key: char,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_space() -> char {
+    ' '
 }
 
 impl Default for Config {
@@ -31,6 +38,7 @@ impl Default for Config {
             history_max_size: 100,
             use_japanese_punctuation: true,
             show_ime_indicator: true,
+            ext_prefix_key: ' ',
         }
     }
 }

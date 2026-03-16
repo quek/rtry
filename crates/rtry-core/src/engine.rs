@@ -40,14 +40,21 @@ pub struct Engine {
     table: Arc<TryCodeTable>,
     state: EngineState,
     history: HistoryManager,
+    /// 3ストローク入力のプレフィックスキー
+    ext_prefix_key: char,
 }
 
 impl Engine {
     pub fn new(table: TryCodeTable) -> Self {
+        Self::with_prefix_key(table, ' ')
+    }
+
+    pub fn with_prefix_key(table: TryCodeTable, ext_prefix_key: char) -> Self {
         Engine {
             table: Arc::new(table),
             state: EngineState::Idle,
             history: HistoryManager::default(),
+            ext_prefix_key,
         }
     }
 
@@ -62,6 +69,10 @@ impl Engine {
 
     pub fn history(&self) -> &HistoryManager {
         &self.history
+    }
+
+    pub fn ext_prefix_key(&self) -> char {
+        self.ext_prefix_key
     }
 
     /// キー入力を処理
@@ -80,8 +91,8 @@ impl Engine {
     pub fn will_consume_key(&self, key: char) -> bool {
         match &self.state {
             EngineState::Idle => {
-                // Space または有効なキーなら消費
-                key == ' ' || self.table.key_to_index(key).is_some()
+                // プレフィックスキーまたは有効なキーなら消費
+                key == self.ext_prefix_key || self.table.key_to_index(key).is_some()
             }
             // 入力中は全キーを消費
             _ => true,
@@ -99,7 +110,7 @@ impl Engine {
     }
 
     fn handle_idle(&mut self, key: char) -> EngineOutput {
-        if key == ' ' {
+        if key == self.ext_prefix_key {
             self.state = EngineState::PrefixStroke;
             return EngineOutput::Consumed;
         }
@@ -115,8 +126,8 @@ impl Engine {
     fn handle_second_stroke(&mut self, first: usize, key: char) -> EngineOutput {
         self.state = EngineState::Idle;
 
-        // Spaceが第2打鍵の場合、第1打鍵のキー文字を出力
-        if key == ' ' {
+        // プレフィックスキーが第2打鍵の場合、第1打鍵のキー文字を出力
+        if key == self.ext_prefix_key {
             if let Some(&ch) = crate::table::QWERTY_KEYS.get(first) {
                 return EngineOutput::Commit(ch.to_string());
             }
@@ -151,10 +162,10 @@ impl Engine {
     }
 
     fn handle_ext_first_stroke(&mut self, key: char) -> EngineOutput {
-        if key == ' ' {
-            // Space Space = Space出力
+        if key == self.ext_prefix_key {
+            // プレフィックスキー2回 = プレフィックスキー自体を出力
             self.state = EngineState::Idle;
-            return EngineOutput::Commit(" ".to_string());
+            return EngineOutput::Commit(self.ext_prefix_key.to_string());
         }
 
         if let Some(idx) = self.table.key_to_index(key) {

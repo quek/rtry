@@ -109,6 +109,7 @@ impl TryCodeTextService {
 
     /// テーブルファイルを探してエンジンを初期化
     fn init_engine(&self) {
+        let config = rtry_core::config::Config::load();
         let paths = [
             Self::dll_dir_table_path(),
             Self::appdata_table_path(),
@@ -119,7 +120,8 @@ impl TryCodeTextService {
                 match TryCodeTable::load(&path) {
                     Ok(table) => {
                         crate::debug_log!("Loaded try-code table from {:?}", path);
-                        *self.engine.borrow_mut() = Some(Engine::new(table));
+                        crate::debug_log!("ext_prefix_key: {:?}", config.ext_prefix_key);
+                        *self.engine.borrow_mut() = Some(Engine::with_prefix_key(table, config.ext_prefix_key));
                         return;
                     }
                     Err(e) => {
