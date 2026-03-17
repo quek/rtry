@@ -20,6 +20,10 @@ pub(crate) struct MazegakiState {
     pub candidates: Vec<String>,
     pub selected: usize,
     pub reading: String,
+    /// カーソル前のテキスト（縮め/伸ばし再検索用）
+    pub pre_text: String,
+    /// 現在の読み文字数
+    pub reading_len: usize,
     /// CUAS環境でpostbufから読みを取得した場合の読み文字数（バックスペースで削除する）
     pub postbuf_reading_len: Option<usize>,
 }

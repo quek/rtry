@@ -86,19 +86,37 @@ impl MazegakiDictionary {
 
     /// テキスト末尾から最長一致検索（活用語対応）
     ///
-    /// 完全一致と活用語を別々に探索し、以下のルールで選択する：
-    /// - 活用語が完全一致に勝つには、語幹文字数 >= 完全一致の文字数が必要
-    /// - それ以外は完全一致を優先（tc2準拠）
-    ///
     /// 戻り値: (読みの文字数, 候補リスト)
     pub fn find_longest_match(&self, text: &str) -> Option<(usize, Vec<String>)> {
+        self.find_match_impl(text, 1, usize::MAX, true)
+    }
+
+    /// current_len より短いマッチを探す（最長優先、候補が見つかるまで縮める）
+    pub fn find_shorter_match(&self, text: &str, current_len: usize) -> Option<(usize, Vec<String>)> {
+        if current_len <= 1 { return None; }
+        self.find_match_impl(text, 1, current_len - 1, true)
+    }
+
+    /// current_len より長いマッチを探す（最短優先、候補が見つかるまで伸ばす）
+    pub fn find_longer_match(&self, text: &str, current_len: usize) -> Option<(usize, Vec<String>)> {
+        self.find_match_impl(text, current_len + 1, usize::MAX, false)
+    }
+
+    /// 交ぜ書き検索の内部実装
+    ///
+    /// min_chars..=max_chars の範囲でマッチを探す。
+    /// prefer_longest=true なら最長、false なら最短を返す。
+    /// 活用語が完全一致に勝つには語幹文字数 >= 完全一致の文字数が必要。
+    fn find_match_impl(
+        &self, text: &str, min_chars: usize, max_chars: usize, prefer_longest: bool,
+    ) -> Option<(usize, Vec<String>)> {
         let char_count = text.chars().count();
-        let max_len = char_count.min(self.max_reading_len + MAX_INFLECTION_SUFFIX);
+        let search_len = char_count.min(self.max_reading_len + MAX_INFLECTION_SUFFIX);
 
         let boundaries: Vec<(usize, usize)> = text
             .char_indices()
             .rev()
-            .take(max_len)
+            .take(search_len)
             .map(|(byte_off, _)| {
                 let char_pos = text[..byte_off].chars().count();
                 (byte_off, char_count - char_pos)
@@ -108,23 +126,26 @@ impl MazegakiDictionary {
             .rev()
             .collect();
 
-        // 完全一致: 最長を探す
+        // 完全一致
         let mut best_exact: Option<(usize, Vec<String>)> = None;
         for &(byte_offset, reading_chars) in &boundaries {
-            if reading_chars > self.max_reading_len {
-                continue;
-            }
+            if reading_chars < min_chars || reading_chars > max_chars { continue; }
+            if reading_chars > self.max_reading_len { continue; }
             let reading = &text[byte_offset..];
             if let Some(candidates) = self.entries.get(reading) {
-                if best_exact.as_ref().is_none_or(|b| reading_chars > b.0) {
+                let dominated = best_exact.as_ref().is_some_and(|b| {
+                    if prefer_longest { reading_chars <= b.0 } else { reading_chars >= b.0 }
+                });
+                if !dominated {
                     best_exact = Some((reading_chars, candidates.clone()));
                 }
             }
         }
 
-        // 活用語: 最長語幹を探す
+        // 活用語
         let mut best_inflection: Option<(usize, usize, Vec<String>)> = None; // (total, stem_chars, candidates)
         for &(byte_offset, reading_chars) in &boundaries {
+            if reading_chars < min_chars || reading_chars > max_chars { continue; }
             let candidate_text = &text[byte_offset..];
             let suffix_max = reading_chars.saturating_sub(1).min(MAX_INFLECTION_SUFFIX);
             let suffix_boundaries: Vec<(usize, usize)> = candidate_text
@@ -139,13 +160,18 @@ impl MazegakiDictionary {
 
             for &(suffix_byte_offset, stem_chars) in &suffix_boundaries {
                 let suffix = &candidate_text[suffix_byte_offset..];
-                if !suffix.chars().all(is_hiragana) {
-                    continue;
-                }
+                if !suffix.chars().all(is_hiragana) { continue; }
                 let stem = &candidate_text[..suffix_byte_offset];
                 let key = format!("{}{}", stem, INFLECTION_MARK);
                 if let Some(dict_candidates) = self.entries.get(&key) {
-                    if best_inflection.as_ref().is_none_or(|b| stem_chars > b.1) {
+                    let dominated = best_inflection.as_ref().is_some_and(|b| {
+                        if prefer_longest {
+                            reading_chars < b.0 || (reading_chars == b.0 && stem_chars <= b.1)
+                        } else {
+                            reading_chars > b.0 || (reading_chars == b.0 && stem_chars <= b.1)
+                        }
+                    });
+                    if !dominated {
                         let candidates: Vec<String> = dict_candidates
                             .iter()
                             .map(|c| format!("{}{}", c, suffix))
@@ -308,6 +334,49 @@ mod tests {
         let (chars, candidates) = dict.find_longest_match("同時にねこ").unwrap();
         assert_eq!(chars, 2);
         assert_eq!(candidates, &["猫"]);
+    }
+
+    #[test]
+    fn test_shorter_match() {
+        let dict = MazegakiDictionary::parse("\
+あきらめ― /諦め/
+きらめ― /煌め/
+る /縷/
+");
+        // "あきらめる": 最長は5文字(あきらめ―+る)
+        // 5文字から縮める → 4文字(きらめ―+る)
+        let (chars, candidates) = dict.find_shorter_match("あきらめる", 5).unwrap();
+        assert_eq!(chars, 4);
+        assert_eq!(candidates, &["煌める"]);
+
+        // 4文字から縮める → 1文字(る完全一致)
+        let (chars, candidates) = dict.find_shorter_match("あきらめる", 4).unwrap();
+        assert_eq!(chars, 1);
+        assert_eq!(candidates, &["縷"]);
+
+        // 1文字からは縮められない
+        assert!(dict.find_shorter_match("あきらめる", 1).is_none());
+    }
+
+    #[test]
+    fn test_longer_match() {
+        let dict = MazegakiDictionary::parse("\
+る /縷/
+め― /目/
+あきらめ― /諦め/
+");
+        // "あきらめる": 1文字(る)から伸ばす → 2文字(め―+る)
+        let (chars, candidates) = dict.find_longer_match("あきらめる", 1).unwrap();
+        assert_eq!(chars, 2);
+        assert_eq!(candidates, &["目る"]);
+
+        // 2文字から伸ばす → 5文字(あきらめ―+る)
+        let (chars, candidates) = dict.find_longer_match("あきらめる", 2).unwrap();
+        assert_eq!(chars, 5);
+        assert_eq!(candidates, &["諦める"]);
+
+        // 5文字から伸ばす → なし
+        assert!(dict.find_longer_match("あきらめる", 5).is_none());
     }
 
     #[test]

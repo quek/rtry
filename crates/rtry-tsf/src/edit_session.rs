@@ -403,6 +403,8 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
             let reading: String = text_chars[reading_start..].iter().collect();
             let state = MazegakiState {
                 reading,
+                pre_text: text.clone(),
+                reading_len,
                 candidates,
                 selected: 0,
                 postbuf_reading_len: if use_postbuf { Some(reading_len) } else { None },
@@ -444,6 +446,83 @@ impl ITfEditSession_Impl for MazegakiUpdateEditSession_Impl {
 
                 crate::debug_log!("MazegakiUpdate: updated to '{}'", self.text);
             }
+        }
+        Ok(())
+    }
+}
+
+/// 交ぜ書き変換の読み長さ変更用エディットセッション
+///
+/// 現在のコンポジションを元の読みに復元→終了→新しい読み長さで再開する。
+#[implement(ITfEditSession)]
+pub struct MazegakiResizeEditSession {
+    context: ITfContext,
+    shared_comp: SharedComposition,
+    composition_sink: ITfCompositionSink,
+    /// 元の読み（キャンセル時の復元テキスト）
+    original_reading: String,
+    /// 新しい読みの文字数
+    new_reading_len: usize,
+    /// 新しい第一候補テキスト
+    new_candidate: String,
+}
+
+impl MazegakiResizeEditSession {
+    pub fn new(
+        context: ITfContext,
+        shared_comp: SharedComposition,
+        composition_sink: ITfCompositionSink,
+        original_reading: String,
+        new_reading_len: usize,
+        new_candidate: String,
+    ) -> Self {
+        MazegakiResizeEditSession {
+            context, shared_comp, composition_sink,
+            original_reading, new_reading_len, new_candidate,
+        }
+    }
+}
+
+impl ITfEditSession_Impl for MazegakiResizeEditSession_Impl {
+    fn DoEditSession(&self, ec: u32) -> Result<()> {
+        crate::caret_rect::update_caret_rect(ec, &self.context);
+        unsafe {
+            let Some(composition) = self.shared_comp.get() else {
+                return Ok(());
+            };
+            let range = composition.GetRange()?;
+
+            // 1. 元の読みに復元
+            let reading_w: Vec<u16> = self.original_reading.encode_utf16().collect();
+            range.SetText(ec, TF_ST_CORRECTION, &reading_w)?;
+
+            // 2. コンポジション終了
+            composition.EndComposition(ec)?;
+            self.shared_comp.clear();
+
+            // 3. 新しい読み長さでコンポジション開始
+            let new_range = range.Clone()?;
+            new_range.Collapse(ec, TF_ANCHOR_END)?;
+            let mut shifted = 0i32;
+            new_range.ShiftStart(ec, -(self.new_reading_len as i32), &mut shifted, std::ptr::null())?;
+
+            let ctx_comp: ITfContextComposition = self.context.cast()?;
+            let new_composition = ctx_comp.StartComposition(
+                ec, &new_range, &self.composition_sink,
+            )?;
+
+            // 4. 新しい候補テキストをセット
+            let candidate_w: Vec<u16> = self.new_candidate.encode_utf16().collect();
+            let new_range2 = new_composition.GetRange()?;
+            new_range2.SetText(ec, TF_ST_CORRECTION, &candidate_w)?;
+
+            set_cursor_to_end(&self.context, ec, &new_range2)?;
+            self.shared_comp.set(new_composition);
+
+            crate::debug_log!(
+                "MazegakiResize: {} chars → {} chars, candidate='{}'",
+                self.original_reading.chars().count(), self.new_reading_len, self.new_candidate
+            );
         }
         Ok(())
     }

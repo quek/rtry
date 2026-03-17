@@ -502,6 +502,11 @@ impl TryCodeTextService_Impl {
                 self.do_mazegaki_cancel(context)?;
                 Ok(TRUE)
             }
+            // Left: 読みを伸ばす / Right: 読みを縮める
+            0x25 | 0x27 => {
+                self.do_mazegaki_resize(context, vk == 0x25)?;
+                Ok(TRUE)
+            }
             // 1-9: 現在ページ内の番号選択で確定
             0x31..=0x39 => {
                 let offset_in_page = (vk - 0x31) as usize;
@@ -525,6 +530,80 @@ impl TryCodeTextService_Impl {
                 Ok(FALSE)
             }
         }
+    }
+
+    /// 交ぜ書き変換の読み長さを変更（Left=伸ばし, Right=縮め）
+    fn do_mazegaki_resize(&self, context: &ITfContext, extend: bool) -> Result<()> {
+        let dict = {
+            let dict_ref = self.mazegaki_dict.borrow();
+            let Some(ref dict) = *dict_ref else { return Ok(()); };
+            dict.clone()
+        };
+
+        let (pre_text, current_len, original_reading, is_postbuf) = {
+            let guard = self.mazegaki_state.lock().unwrap();
+            let Some(ref state) = *guard else { return Ok(()); };
+            (
+                state.pre_text.clone(),
+                state.reading_len,
+                state.reading.clone(),
+                state.postbuf_reading_len.is_some(),
+            )
+        };
+
+        // CUAS環境ではリサイズ非対応
+        if is_postbuf { return Ok(()); }
+
+        let result = if extend {
+            dict.find_longer_match(&pre_text, current_len)
+        } else {
+            dict.find_shorter_match(&pre_text, current_len)
+        };
+
+        let Some((new_reading_len, new_candidates)) = result else {
+            crate::debug_log!("MazegakiResize: no {} match from {} chars",
+                if extend { "longer" } else { "shorter" }, current_len);
+            return Ok(());
+        };
+
+        // MazegakiState を更新
+        let text_chars: Vec<char> = pre_text.chars().collect();
+        let reading_start = text_chars.len() - new_reading_len;
+        let new_reading: String = text_chars[reading_start..].iter().collect();
+        {
+            let mut guard = self.mazegaki_state.lock().unwrap();
+            if let Some(ref mut state) = *guard {
+                state.reading = new_reading;
+                state.reading_len = new_reading_len;
+                state.candidates = new_candidates.clone();
+                state.selected = 0;
+            }
+        }
+
+        // EditSession でコンポジション範囲を変更
+        let tid = *self.client_id.borrow();
+        let this_unknown: IUnknown = self.to_interface();
+        let comp_sink: ITfCompositionSink = this_unknown.cast()?;
+        let session = edit_session::MazegakiResizeEditSession::new(
+            context.clone(),
+            self.composition.clone(),
+            comp_sink,
+            original_reading,
+            new_reading_len,
+            new_candidates[0].clone(),
+        );
+        let session: ITfEditSession = session.into();
+        unsafe {
+            let _ = context.RequestEditSession(tid, &session, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE)?;
+        }
+
+        // 候補ウィンドウ更新
+        let state = self.mazegaki_state.lock().unwrap();
+        if let Some(ref state) = *state {
+            crate::candidate_window::show_candidates(&state.candidates, state.selected);
+        }
+
+        Ok(())
     }
 
     /// 交ぜ書き候補のテキストを更新
