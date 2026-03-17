@@ -365,13 +365,13 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
                 crate::debug_log!("MazegakiStart: TSF read failed, using postbuf fallback '{}'", text);
             }
 
-            // 最長一致検索
-            let Some((reading_len, reading, candidates)) = self.dict.find_longest_match(&text) else {
+            // 最長一致検索（活用語対応）
+            let Some((reading_len, candidates)) = self.dict.find_longest_match(&text) else {
                 crate::debug_log!("MazegakiStart: no match found");
                 return Ok(());
             };
-            crate::debug_log!("MazegakiStart: matched '{}' ({} chars), {} candidates",
-                reading, reading_len, candidates.len());
+            crate::debug_log!("MazegakiStart: matched {} chars, {} candidates",
+                reading_len, candidates.len());
 
             if !use_postbuf {
                 // 通常環境: 読みの範囲にコンポジションを開始
@@ -397,9 +397,13 @@ impl ITfEditSession_Impl for MazegakiStartEditSession_Impl {
             }
 
             // MazegakiState を結果スロットにセット
+            // reading: 元のテキストからreading_len文字分を保持（キャンセル時の復元用）
+            let text_chars: Vec<char> = text.chars().collect();
+            let reading_start = text_chars.len() - reading_len;
+            let reading: String = text_chars[reading_start..].iter().collect();
             let state = MazegakiState {
-                reading: reading.to_string(),
-                candidates: candidates.to_vec(),
+                reading,
+                candidates,
                 selected: 0,
                 postbuf_reading_len: if use_postbuf { Some(reading_len) } else { None },
             };
