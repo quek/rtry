@@ -1,121 +1,76 @@
 ---
 name: research-similar-impl
 description: |
-  類似プロダクトのソースコードを調査してから実装する。新機能の実装やバグ修正の前に、
-  類似のオープンソースプロジェクトがどのようにその機能を実装しているかを調査し、
-  API の使い方、設計パターン、互換性の注意点をレポートする。
-  CLAUDE.md に「類似プロダクトのソースコードを参考にする」とあるように、
-  推測でコードを書かず、まず調査してから実装に入ることが重要。
-  ユーザーが新機能の実装を依頼したとき、バグの修正を依頼したとき、
-  Windows API や COM インターフェースの使い方が不明なとき、
-  「実装して」「追加して」「修正して」「対応して」等の指示があったときに発動する。
-  実装の計画段階（EnterPlanMode）で使うのが最適。
+  類似 TSF IME プロダクト（tsf-tutcode, CorvusSKK, SampleIME）のソースコードと
+  公式 API リファレンスを調査し、実装方針レポートを出力する。
+  「実装して」「追加して」「修正して」「対応して」「機能を作って」「バグを直して」等、
+  コード変更を伴う指示があったとき、または Windows API / COM の使い方が不明なときに発動。
+  調査のみ行い、コードの編集は行わない。
+argument-hint: "[調査対象の機能名]"
+allowed-tools: Bash(git clone *), Bash(git pull *), Read, Grep, Glob, WebSearch, WebFetch, Agent
 ---
 
-# 類似プロダクト調査スキル
+# 類似プロダクト & API リファレンス調査
 
-## 目的
+$ARGUMENTS に関する調査を行い、rtry での実装方針を立てるためのレポートを出力する。
 
-CLAUDE.md の開発ルールに「推測でコードを書くな」「類似プロダクトのソースコードを参考にする」とある。
-このスキルは、実装を始める前に類似プロジェクトを体系的に調査し、
-確実な根拠に基づいた実装方針を立てるためのもの。
+## 手順
 
-## 調査対象プロジェクト
+### 1. 調査対象の特定
 
-対象の機能に応じて、以下のプロジェクトのソースコードを調査する:
+ユーザーの要求から実装対象の TSF 機能・Windows API を特定する。
+[references.md](references.md) の「TSF 機能と API の対応例」を参照。
 
-| プロジェクト | 言語 | 特徴 | URL |
-|---|---|---|---|
-| tsf-tutcode | C++ | T-Code 系 TSF IME、rtry と最も近い設計 | https://github.com/deton/tsf-tutcode |
-| CorvusSKK | C++ | 高品質な TSF IME、SKK 方式 | https://github.com/corvusskk/corvusskk |
-| Microsoft SampleIME | C++ | Microsoft 公式の TSF サンプル | https://github.com/microsoft/Windows-classic-samples/tree/main/Samples/IME |
+### 2. リポジトリのクローン
 
-## 調査手順
-
-### ステップ 1: 機能の特定
-
-ユーザーの要求から、実装対象の TSF 機能・Windows API を特定する。例:
-- カーソル位置の取得 → `ITfContextView::GetTextExt`
-- 候補ウィンドウ → `ITfCandidateListUIElement` or Win32 popup
-- 入力モード表示 → `ITfLangBarItemButton` or indicator window
-- テキスト属性 → `ITfDisplayAttributeProvider`
-
-### ステップ 2: リポジトリをローカルにクローン
-
-調査対象のリポジトリを `/tmp` にクローンして、grep / Read で横断検索する。
-curl で1ファイルずつ取得するより圧倒的に効率が良い。
+[references.md](references.md) の調査対象プロジェクトから、機能に関連するものを `/tmp` にクローンする。
 
 ```bash
-# 既にクローン済みならスキップ（--depth 1 で軽量クローン）
 [ -d /tmp/tsf-tutcode ] || git clone --depth 1 https://github.com/deton/tsf-tutcode.git /tmp/tsf-tutcode
 [ -d /tmp/corvusskk ]   || git clone --depth 1 https://github.com/corvusskk/corvusskk.git /tmp/corvusskk
 ```
 
-- クローン先は必ず `/tmp` 配下にする（作業ディレクトリを汚さない）
-- `--depth 1` で最新コミットのみ取得する（高速化）
-- 既にクローン済みの場合は再クローンしない
-- 全プロジェクトをクローンする必要はない。機能に最も関連するものを優先する
+- クローン先は `/tmp` 配下（作業ディレクトリを汚さない）
+- `--depth 1` で軽量クローン
+- 既存ならスキップ
 
-### ステップ 2b: ソースコード調査
+### 3. 並列調査（Agent を並列起動）
 
-クローンしたリポジトリに対して Grep / Read で該当機能の実装を検索・読解する。
-並列に複数のエージェントを起動して効率化する。
+以下の A) と B) を **Agent を並列起動して同時に** 実行する。
 
-調査のポイント:
-1. **API の実際の呼び出しパターン** — 関数シグネチャ、引数の型、戻り値の扱い
-2. **設計パターン** — クラス/構造体の構成、状態管理、COM インターフェースの実装方法
-3. **エラーハンドリング** — 失敗時のフォールバック、HRESULT のチェック方法
-4. **CUAS 互換性** — CUAS（Emacs 等の IMM32 アプリ）での制限と回避策
-5. **スレッドモデル** — STA/MTA、EditSession の同期/非同期
+**A) 類似プロダクトのソースコード調査**
 
-### ステップ 3: windows crate の API 確認（Rust 固有）
+クローン済みリポジトリを Grep / Read で横断検索。調査ポイント:
+- API の呼び出しパターン（シグネチャ、引数、戻り値）
+- 設計パターン（状態管理、COM インターフェースの構成）
+- エラーハンドリングとフォールバック
+- CUAS 互換性（Emacs 等 IMM32 アプリでの回避策）
+- スレッドモデル（STA/MTA、EditSession の同期/非同期）
 
-rtry は Rust の `windows` crate を使っているため、C++ の API と Rust のバインディングで
-シグネチャが異なる場合がある。必ず `~/.cargo/registry/src/` 内のソースを grep して
-実際の Rust シグネチャを確認する。
+**B) 公式 API リファレンス・ガイド調査**
 
-確認すべき点:
+[references.md](references.md) の API ドキュメント URL を WebFetch / WebSearch で調査:
+- 該当 API の公式仕様・制約
+- 使用上の注意点やベストプラクティス
+- サンプルコード
+
+### 4. windows crate の API 確認
+
+C++ の API と Rust バインディングでシグネチャが異なるため、
+`~/.cargo/registry/src/` 内のソースを Grep して実際の Rust シグネチャを確認する。
+
+確認ポイント:
 - COM メソッドの引数型（`Ref<'_, T>` vs `Option<&T>` vs 生ポインタ）
 - `Result<T>` のラッピング
-- `ManuallyDrop` や `VARIANT` の扱い
+- `ManuallyDrop` / `VARIANT` の扱い
 - 定数名の違い（例: `TF_ANCHOR_END` vs `TfAnchor_TF_ANCHOR_END`）
 
-### ステップ 4: レポート出力
+### 5. レポート出力
 
-以下の形式で調査結果をまとめる（日本語で）:
+[report-template.md](report-template.md) の形式で日本語でまとめる。
 
-```
-## 調査結果: [機能名]
+## 制約
 
-### 各プロジェクトの実装
-
-#### tsf-tutcode
-- ファイル: ...
-- パターン: ...
-- API 呼び出し: ...
-
-#### CorvusSKK / SampleIME
-- ...
-
-### 推奨アプローチ
-- rtry での実装方針
-- 採用する設計パターンとその理由
-
-### windows crate の API シグネチャ
-- 確認した関数とそのシグネチャ
-
-### CUAS/互換性の注意点
-- CUAS 環境での制限と対策
-- エッジケースの扱い
-
-### 参考コード
-- 具体的なコード例（C++ → Rust への変換ポイント）
-```
-
-## 注意事項
-
-- 調査は実装の**前**に行う。コードを書き始めてから調査するのは非効率
-- 3 つのプロジェクト全てを調査する必要はない。機能に最も関連するものを優先する
-- tsf-tutcode は rtry と同じ T-Code 系で設計が最も近いため、最優先で参照する
-- windows crate の API 確認は省略しない。C++ と Rust でシグネチャが異なることが多い
-- **このスキルは調査のみを行う。ファイルの編集・作成・ビルド・インストール等、環境を変更する操作は一切行わない**
+- **調査のみ**。ファイルの編集・作成・ビルド・インストール等は一切行わない
+- tsf-tutcode は rtry と最も設計が近いため最優先で参照する
+- windows crate の API 確認は省略しない
