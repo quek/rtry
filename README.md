@@ -12,55 +12,31 @@ cargo build --release -p rtry-tsf
 
 ## インストール
 
-### 1. データファイルの配置
+管理者権限で `install.bat` を実行します。DLL・データファイルが `C:\Program Files\rtry\` にコピーされ、DLL登録まで行われます。
 
-```cmd
-mkdir %APPDATA%\rtry
-copy data\try.tbl %APPDATA%\rtry\try.tbl
-copy data\mazegaki.dic %APPDATA%\rtry\mazegaki.dic
-```
-
-交ぜ書き辞書はtc2辞書とSKK-JISYO.Lをマージした辞書（約184,000件）を同梱しています。活用語（`―`マーカー付きエントリ）にも対応しています。
-
-### 2. DLL登録 (管理者権限が必要)
-
-管理者権限でコマンドプロンプトを開き:
-
-```cmd
-regsvr32 F:\dev\rtry\target\release\rtry_tsf.dll
-```
-
-成功すると「DllRegisterServer は成功しました」と表示されます。
-
-### 3. IMEの有効化
+初回インストール後、IMEを有効化してください:
 
 1. 設定 → 時刻と言語 → 言語と地域
 2. 日本語 → 言語オプション → キーボードの追加
 3. 「Try-Code」を選択
 
-### 4. IMEの切り替え
-
-`Win + Space` でIMEを切り替えます。タスクバーの入力インジケータからも選択可能。
+`Win + Space` でIMEを切り替えられます。
 
 ## アンインストール
 
-### 1. IMEの無効化
+管理者権限で `uninstall.bat` を実行します。DLL登録解除とDLL削除が行われます。
 
-1. 設定 → 時刻と言語 → 言語と地域
-2. 日本語 → 言語オプション
-3. 「Try-Code」の横の「...」→ 削除
-
-### 2. DLL登録解除 (管理者権限が必要)
-
-```cmd
-regsvr32 /u F:\dev\rtry\target\release\rtry_tsf.dll
-```
-
-### 3. データファイルの削除 (任意)
+設定ファイルが不要な場合は手動で削除してください:
 
 ```cmd
 rmdir /s %APPDATA%\rtry
 ```
+
+IMEの無効化:
+
+1. 設定 → 時刻と言語 → 言語と地域
+2. 日本語 → 言語オプション
+3. 「Try-Code」の横の「...」→ 削除
 
 ## 使い方
 
