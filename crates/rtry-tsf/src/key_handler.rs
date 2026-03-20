@@ -27,6 +27,15 @@ fn has_modifier_key() -> bool {
     }
 }
 
+/// Shift のみが押されているか判定（Ctrl/Alt なし）
+fn is_shift_only() -> bool {
+    unsafe {
+        GetKeyState(VK_SHIFT.0 as i32) < 0
+            && GetKeyState(VK_CONTROL.0 as i32) >= 0
+            && GetKeyState(VK_MENU.0 as i32) >= 0
+    }
+}
+
 /// IMEオン/オフトグルキーか判定 (Alt+` または 半角/全角)
 fn is_toggle_key(wparam: WPARAM) -> bool {
     let vk = wparam.0 as u32;
@@ -101,6 +110,14 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
             return Ok(FALSE);
         }
 
+        // 交ぜ書き変換中は Ctrl/Alt 付きのみパススルー（Shift-Space 等は消費）
+        if self.mazegaki_state.lock().unwrap().is_some() {
+            if has_modifier_key() && !is_shift_only() {
+                return Ok(FALSE);
+            }
+            return Ok(TRUE);
+        }
+
         // 修飾キー（Ctrl/Shift/Alt）付きはパススルー（C-c, C-v 等）
         if has_modifier_key() {
             return Ok(FALSE);
@@ -119,11 +136,6 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                     return Ok(TRUE);
                 }
             }
-        }
-
-        // 交ぜ書き変換中は全キー消費
-        if self.mazegaki_state.lock().unwrap().is_some() {
-            return Ok(TRUE);
         }
 
         let engine = self.engine.borrow();
@@ -209,16 +221,25 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
             return Ok(FALSE);
         }
 
+        crate::ime_indicator::update_position();
+
+        let context = pic.clone().ok_or_else(|| Error::from_hresult(E_INVALIDARG))?;
+
+        // 交ぜ書き変換中のキー処理（Shift-Space 等のため修飾キーチェックより先）
+        if self.mazegaki_state.lock().unwrap().is_some() {
+            // Ctrl/Alt 付きはパススルー（C-c, C-v 等）
+            if has_modifier_key() && !is_shift_only() {
+                return Ok(FALSE);
+            }
+            return self.handle_mazegaki_key(&context, wparam);
+        }
+
         // 修飾キー（Ctrl/Shift/Alt）付きはパススルー（C-c, C-v 等）
         // 注: 一部のアプリ（Windows 11 メモ帳等）は OnTestKeyDown を呼ばず
         // OnKeyDown を直接呼ぶため、ここでもチェックが必要
         if has_modifier_key() {
             return Ok(FALSE);
         }
-
-        crate::ime_indicator::update_position();
-
-        let context = pic.clone().ok_or_else(|| Error::from_hresult(E_INVALIDARG))?;
 
         // CUAS遅延置換: 番兵 VK_BACK が到着 → 置換テキストを確定
         if wparam.0 as u32 == VK_BACK.0 as u32 {
@@ -228,11 +249,6 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                 self.do_commit(&context, &p.text)?;
                 return Ok(TRUE);
             }
-        }
-
-        // 交ぜ書き変換中のキー処理
-        if self.mazegaki_state.lock().unwrap().is_some() {
-            return self.handle_mazegaki_key(&context, wparam);
         }
 
         let output = {
@@ -453,9 +469,18 @@ impl TryCodeTextService_Impl {
     fn handle_mazegaki_key(&self, context: &ITfContext, wparam: WPARAM) -> Result<BOOL> {
         let vk = wparam.0 as u32;
 
+        // 修飾キー単体（Shift/Ctrl/Alt）は無視
+        if matches!(vk, 0x10 | 0x11 | 0x12 | 0xA0..=0xA5) {
+            return Ok(TRUE);
+        }
+
+        let page_size = crate::candidate_window::PAGE_SIZE;
+
         match vk {
-            // Space: 次候補 / PgDn: 次ページ / PgUp: 前ページ
-            0x20 | 0x22 | 0x21 => {
+            // Space: 次候補 / Shift-Space: 前候補
+            // Down: 次候補 / Up: 前候補
+            // PgDn: 次ページ / PgUp: 前ページ
+            0x20 | 0x26 | 0x28 | 0x22 | 0x21 => {
                 let (text, selected, is_postbuf) = {
                     let mut guard = self.mazegaki_state.lock().unwrap();
                     let Some(ref mut state) = *guard else {
@@ -463,21 +488,31 @@ impl TryCodeTextService_Impl {
                     };
                     let len = state.candidates.len();
                     state.selected = match vk {
-                        // Space: 次候補
-                        0x20 => (state.selected + 1) % len,
+                        // Space: Shift なら前候補、なしなら次候補
+                        0x20 => {
+                            if is_shift_only() {
+                                (state.selected + len - 1) % len
+                            } else {
+                                (state.selected + 1) % len
+                            }
+                        }
+                        // Down: 次候補
+                        0x28 => (state.selected + 1) % len,
+                        // Up: 前候補
+                        0x26 => (state.selected + len - 1) % len,
                         // PgDn: 次ページ先頭
                         0x22 => {
-                            let page = state.selected / 9;
-                            let total_pages = (len + 8) / 9;
+                            let page = state.selected / page_size;
+                            let total_pages = (len + page_size - 1) / page_size;
                             let next_page = if page + 1 < total_pages { page + 1 } else { 0 };
-                            (next_page * 9).min(len - 1)
+                            (next_page * page_size).min(len - 1)
                         }
                         // PgUp: 前ページ先頭
                         _ => {
-                            let page = state.selected / 9;
-                            let total_pages = (len + 8) / 9;
+                            let page = state.selected / page_size;
+                            let total_pages = (len + page_size - 1) / page_size;
                             let prev_page = if page > 0 { page - 1 } else { total_pages - 1 };
-                            (prev_page * 9).min(len - 1)
+                            (prev_page * page_size).min(len - 1)
                         }
                     };
                     (
@@ -507,13 +542,19 @@ impl TryCodeTextService_Impl {
                 self.do_mazegaki_resize(context, vk == 0x25)?;
                 Ok(TRUE)
             }
-            // 1-9: 現在ページ内の番号選択で確定
-            0x31..=0x39 => {
-                let offset_in_page = (vk - 0x31) as usize;
+            // 3段目キー(a-;): ページ内のショートカット選択で確定
+            _ if {
+                let labels = crate::candidate_window::current_labels();
+                vk_to_char(wparam).is_some_and(|ch| labels.contains(&ch))
+            } => {
+                let labels = crate::candidate_window::current_labels();
+                let ch = vk_to_char(wparam).unwrap();
+                let offset_in_page = labels.iter().position(|&l| l == ch).unwrap();
                 {
                     let mut guard = self.mazegaki_state.lock().unwrap();
                     if let Some(ref mut state) = *guard {
-                        let page_start = (state.selected / 9) * 9;
+                        let page_size = crate::candidate_window::PAGE_SIZE;
+                        let page_start = (state.selected / page_size) * page_size;
                         let abs_index = page_start + offset_in_page;
                         if abs_index < state.candidates.len() {
                             state.selected = abs_index;

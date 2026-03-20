@@ -25,18 +25,36 @@ const CAND_CLASS: PCWSTR = w!("RtryCandidateWindow");
 const LINE_HEIGHT: i32 = 20;
 const PADDING_X: i32 = 8;
 const PADDING_Y: i32 = 4;
-const PAGE_SIZE: usize = 9;
+pub const PAGE_SIZE: usize = 10;
+
+/// デフォルトのショートカットラベル（QWERTY 3段目）
+const DEFAULT_LABELS: [char; PAGE_SIZE] = ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';'];
+
+/// 候補選択ラベル（キーレイアウトから設定される）
+static LABELS: Mutex<[char; PAGE_SIZE]> = Mutex::new(DEFAULT_LABELS);
+
+/// 候補選択ラベルを設定（キーレイアウトの3段目キーから）
+pub fn set_labels(keys: &[char; 40]) {
+    let mut labels = LABELS.lock().unwrap();
+    labels.copy_from_slice(&keys[20..30]);
+}
+
+/// 現在のラベル配列を取得
+pub fn current_labels() -> [char; PAGE_SIZE] {
+    *LABELS.lock().unwrap()
+}
 
 /// 候補ウィンドウを表示/更新
 pub fn show_candidates(candidates: &[String], selected: usize) {
     // データを更新
+    let labels = current_labels();
     {
         let mut data = CAND_DATA.lock().unwrap();
         *data = Some(CandidateData {
             candidates: candidates.to_vec(),
             selected,
         });
-    }
+    };
 
     let raw = CAND_HWND.load(Ordering::SeqCst);
     if raw != 0 {
@@ -50,7 +68,7 @@ pub fn show_candidates(candidates: &[String], selected: usize) {
             let total_pages = (candidates.len() + PAGE_SIZE - 1) / PAGE_SIZE;
             let count = page_candidates.len() as i32;
             let indicator_height = if total_pages > 1 { LINE_HEIGHT } else { 0 };
-            let width = calc_page_width(page_candidates, page_start) + PADDING_X * 2 + 40;
+            let width = calc_page_width(page_candidates, page_start, &labels) + PADDING_X * 2 + 40;
             let height = count * LINE_HEIGHT + PADDING_Y * 2 + indicator_height;
             let _ = SetWindowPos(
                 hwnd,
@@ -80,7 +98,7 @@ pub fn show_candidates(candidates: &[String], selected: usize) {
         let count = page_candidates.len() as i32;
         // 複数ページなら下部にページインジケータ行を追加
         let indicator_height = if total_pages > 1 { LINE_HEIGHT } else { 0 };
-        let width = calc_page_width(page_candidates, page_start) + PADDING_X * 2 + 40;
+        let width = calc_page_width(page_candidates, page_start, &labels) + PADDING_X * 2 + 40;
         let height = count * LINE_HEIGHT + PADDING_Y * 2 + indicator_height;
 
         let hwnd = CreateWindowExW(
@@ -133,8 +151,9 @@ pub fn update_selected(selected: usize) {
                     let total_pages = (data.candidates.len() + PAGE_SIZE - 1) / PAGE_SIZE;
                     let count = page_candidates.len() as i32;
                     let indicator_height = if total_pages > 1 { LINE_HEIGHT } else { 0 };
+                    let labels = current_labels();
                     let width =
-                        calc_page_width(page_candidates, page_start) + PADDING_X * 2 + 40;
+                        calc_page_width(page_candidates, page_start, &labels) + PADDING_X * 2 + 40;
                     let height = count * LINE_HEIGHT + PADDING_Y * 2 + indicator_height;
                     (width, height)
                 })
@@ -168,12 +187,13 @@ pub fn dismiss() {
 }
 
 /// ページ内候補テキストの最大幅を計測
-unsafe fn calc_page_width(page_candidates: &[String], page_start: usize) -> i32 {
+unsafe fn calc_page_width(page_candidates: &[String], page_start: usize, labels: &[char; PAGE_SIZE]) -> i32 {
     unsafe {
         let hdc = GetDC(None);
         let mut max_w = 0i32;
         for (i, cand) in page_candidates.iter().enumerate() {
-            let label = format!("{}. {}", i + 1, cand);
+            let key_label = labels.get(i).copied().unwrap_or(' ');
+            let label = format!("{}. {}", key_label, cand);
             let mut buf: Vec<u16> = label.encode_utf16().collect();
             let mut rect = RECT::default();
             DrawTextW(hdc, &mut buf, &mut rect, DT_CALCRECT | DT_NOPREFIX);
@@ -228,6 +248,7 @@ unsafe extern "system" fn cand_wnd_proc(
                     let page_start = page * PAGE_SIZE;
                     let page_end = data.candidates.len().min(page_start + PAGE_SIZE);
                     let total_pages = (data.candidates.len() + PAGE_SIZE - 1) / PAGE_SIZE;
+                    let labels = current_labels();
 
                     for (i, cand) in data.candidates[page_start..page_end].iter().enumerate()
                     {
@@ -254,7 +275,8 @@ unsafe extern "system" fn cand_wnd_proc(
                             SetTextColor(hdc, COLORREF(0x00333333));
                         }
 
-                        let label = format!("{}. {}", i + 1, cand);
+                        let key_label = labels.get(i).copied().unwrap_or(' ');
+                        let label = format!("{}. {}", key_label, cand);
                         let mut buf: Vec<u16> = label.encode_utf16().collect();
                         rc.left = PADDING_X;
                         DrawTextW(hdc, &mut buf, &mut rc, DT_LEFT | DT_NOPREFIX | DT_SINGLELINE | DT_VCENTER);

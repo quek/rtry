@@ -156,6 +156,7 @@ impl TryCodeTextService {
                         let key_layout = config.effective_key_layout();
                         crate::debug_log!("key_layout: {:?}", key_layout);
                         table.set_key_layout(key_layout);
+                        crate::candidate_window::set_labels(&key_layout);
                         *self.engine.borrow_mut() = Some(Engine::with_prefix_key(table, config.ext_prefix_key));
                         return;
                     }
