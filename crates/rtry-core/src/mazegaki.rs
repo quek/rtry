@@ -182,8 +182,16 @@ impl MazegakiDictionary {
             }
         }
 
-        // 判定: 活用語が勝つには語幹文字数 >= 完全一致の文字数が必要
+        // 判定:
+        // - 同じ読み長さ → 完全一致 + 活用語をマージ
+        // - 活用語が長い場合、語幹文字数 >= 完全一致の文字数なら活用語が勝つ
+        // - それ以外 → 完全一致が勝つ
         match (best_exact, best_inflection) {
+            (Some(exact), Some((total, _stem, inf_cands))) if total == exact.0 => {
+                let mut merged = exact.1;
+                merged.extend(inf_cands);
+                Some((exact.0, merged))
+            }
             (Some(exact), Some((total, stem, candidates))) if stem >= exact.0 => {
                 Some((total, candidates))
             }
@@ -313,15 +321,15 @@ mod tests {
     }
 
     #[test]
-    fn test_same_length_exact_preferred() {
-        // 同じ文字数なら完全一致が活用語より優先される
+    fn test_same_length_merges_exact_and_inflection() {
+        // 同じ文字数なら完全一致 + 活用語をマージ（完全一致が先）
         let dict = MazegakiDictionary::parse("\
 きる /着る/切る/
 き― /来/
 ");
         let (chars, candidates) = dict.find_longest_match("きる").unwrap();
         assert_eq!(chars, 2);
-        assert_eq!(candidates, &["着る", "切る"]);
+        assert_eq!(candidates, &["着る", "切る", "来る"]);
     }
 
     #[test]
@@ -377,6 +385,18 @@ mod tests {
 
         // 5文字から伸ばす → なし
         assert!(dict.find_longer_match("あきらめる", 5).is_none());
+    }
+
+    #[test]
+    fn test_hoshii_merges_exact_and_inflection() {
+        // 「ほしい」: 完全一致(糒)と活用語(欲しい)をマージ
+        let dict = MazegakiDictionary::parse("\
+ほしい /糒/
+ほし― /欲し/
+");
+        let (chars, candidates) = dict.find_longest_match("ほしい").unwrap();
+        assert_eq!(chars, 3);
+        assert_eq!(candidates, &["糒", "欲しい"]);
     }
 
     #[test]
