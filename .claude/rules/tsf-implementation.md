@@ -6,8 +6,9 @@ paths:
 # TSF 実装の注意点
 
 ## TSF キーイベント
-- 一部のアプリ（Windows 11 メモ帳等）は `OnTestKeyDown` を呼ばず `OnKeyDown` を直接呼ぶ
+- 一部のアプリ（Windows 11 メモ帳、cmd.exe 等）は `OnTestKeyDown` を呼ばず `OnKeyDown` を直接呼ぶ
 - キーフィルタリングは `OnTestKeyDown` と `OnKeyDown` の**両方**に必要
+- **両メソッドのキー処理ロジックは必ず同一にする**。片方だけ修正するともう片方の呼び出しパターンのアプリで壊れる
 - `OnKeyDown` の戻り値 `FALSE` でキーはアプリにパススルー
 
 ## CUAS 環境（Emacs 等 IMM32 アプリ）
@@ -17,12 +18,15 @@ CUAS 互換レイヤーのテキストストアは書き込み専用（`ShiftSta
 ### SharedPostBuf
 - 確定テキストを最大 10 文字保持する内部バッファ（TSF 読み取り失敗時のフォールバック）
 - IME オン後に入力した文字のみ蓄積。既存テキストに対する操作は不可
+- BS パススルー時は `postbuf_remove_tail(1)` で同期する（OnTestKeyDown / OnKeyDown 両方）
+- cmd.exe も CUAS 環境（`GetText` が 0 を返す）であり PostBuf パスを使う
 
 ### VKBackBasedDeleter（交ぜ書き確定フロー）
 - tsf-tutcode/Mozc 由来のパターン
 - N+1 個の VK_BACK を SendInput で送信
-- 最初の N 個: `OnTestKeyDown` で FALSE を返しアプリに渡す（読みを削除）
+- 最初の N 個: `remaining_bs` をデクリメントし FALSE を返してアプリに渡す（読みを削除）
 - 番兵（N+1 個目）: IME が消費して do_commit を実行
+- **`remaining_bs` のチェックは `OnTestKeyDown` と `OnKeyDown` の両方に必要**（cmd 等は OnKeyDown のみ呼ぶため）
 - **重要**: `RequestEditSession(TF_ES_ASYNCDONTCARE)` は同期実行される場合がある。SendInput 後に直接 do_commit を呼んではならない
 
 ## IME オン/オフ

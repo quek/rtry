@@ -161,6 +161,12 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
             }
         }
 
+        // BS（エンジンIdle時）: postbufから1文字削除してアプリにパススルー
+        if wparam.0 as u32 == VK_BACK.0 as u32 {
+            crate::text_service::postbuf_remove_tail(&self.postbuf, 1);
+            return Ok(FALSE);
+        }
+
         // T-Code 40キーまたはプレフィックスキーに変換
         let ch = vk_to_char(wparam).or_else(|| {
             let c = vk_to_any_char(wparam)?;
@@ -241,13 +247,23 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
             return Ok(FALSE);
         }
 
-        // CUAS遅延置換: 番兵 VK_BACK が到着 → 置換テキストを確定
+        // CUAS遅延置換中の VK_BACK 処理
         if wparam.0 as u32 == VK_BACK.0 as u32 {
-            let pending = self.pending_replace.borrow_mut().take();
-            if let Some(p) = pending {
-                crate::debug_log!("PendingReplace: sentinel arrived, committing '{}'", p.text);
-                self.do_commit(&context, &p.text)?;
-                return Ok(TRUE);
+            let mut pending = self.pending_replace.borrow_mut();
+            if let Some(ref mut p) = *pending {
+                if p.remaining_bs > 0 {
+                    // 読み削除用: アプリに渡す
+                    p.remaining_bs -= 1;
+                    return Ok(FALSE);
+                } else {
+                    // 番兵: IMEが消費して置換テキストを確定
+                    let text = p.text.clone();
+                    drop(pending);
+                    self.pending_replace.borrow_mut().take();
+                    crate::debug_log!("PendingReplace: sentinel arrived, committing '{}'", text);
+                    self.do_commit(&context, &text)?;
+                    return Ok(TRUE);
+                }
             }
         }
 
@@ -277,6 +293,12 @@ impl ITfKeyEventSink_Impl for TryCodeTextService_Impl {
                     engine.reset();
                     return Ok(FALSE);
                 }
+            }
+
+            // BS: アプリにパススルーし、postbuf からも1文字削除
+            if wparam.0 as u32 == VK_BACK.0 as u32 {
+                crate::text_service::postbuf_remove_tail(&self.postbuf, 1);
+                return Ok(FALSE);
             }
 
             // T-Code 40キーまたはプレフィックスキーに変換
