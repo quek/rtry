@@ -38,10 +38,15 @@ CUAS 互換レイヤーのテキストストアは書き込み専用（`ShiftSta
 ## カーソル位置
 - テキスト確定後は `Collapse(TF_ANCHOR_END)` + `SetSelection` でカーソルを末尾に移動
 
+## ファイルパスと権限
+- `C:\Program Files\rtry\`: 読み取り専用（管理者権限でのみ書き込み可）。DLL・データの配置先
+- `%APPDATA%\rtry\`: ユーザー書き込み可能。設定ファイルの保存先
+- **原則**: ユーザープロセス（rtry-config 等）が書き込むファイルは `%APPDATA%` に置く。Program Files には install.bat（管理者権限）でのみ書き込む
+
 ## AppContainer 対応
 - SearchHost.exe 等は `%APPDATA%` にアクセスできない
 - DLL・データは `C:\Program Files\rtry\` に配置（AppContainer から読み取り可能）
-- 設定ファイル検索順: DLL と同じディレクトリ → `%APPDATA%\rtry\`（フォールバック）
+- 設定ファイル検索順: `%APPDATA%\rtry\` → DLL と同じディレクトリ（フォールバック）
 - ACL 対応（CorvusSKK 方式）: rtry-config が設定保存時に `ALL_APP_PACKAGES`（AC）読み取り権限を SDDL で設定
 
 ## インストール構成

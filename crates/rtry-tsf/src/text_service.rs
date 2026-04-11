@@ -111,11 +111,11 @@ impl TryCodeTextService {
         }
     }
 
-    /// config.json を DLL ディレクトリ → %APPDATA% の順で探して読み込み
+    /// config.json を %APPDATA% → DLL ディレクトリの順で探して読み込み
     fn load_config() -> rtry_core::config::Config {
         let paths = [
-            Self::dll_dir_path().map(|p| p.join("config.json")),
             rtry_core::config::Config::config_path(),
+            Self::dll_dir_path().map(|p| p.join("config.json")),
         ];
         for path in paths.into_iter().flatten() {
             if path.exists() {
