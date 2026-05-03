@@ -51,8 +51,11 @@ impl Default for Config {
 
 impl Config {
     /// 設定ディレクトリのパスを取得
+    ///
+    /// `%ProgramData%\rtry` を返す。Microsoft 公式仕様で MSIX/UWP のファイル仮想化対象外なので、
+    /// AppContainer (Claude Desktop App 等) 含む全プロセスから同一実体として見える。
     pub fn config_dir() -> Option<PathBuf> {
-        std::env::var("APPDATA")
+        std::env::var("PROGRAMDATA")
             .ok()
             .map(|p| PathBuf::from(p).join("rtry"))
     }

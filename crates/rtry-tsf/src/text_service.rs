@@ -111,7 +111,11 @@ impl TryCodeTextService {
         }
     }
 
-    /// config.json を %APPDATA% → DLL ディレクトリの順で探して読み込み
+    /// config.json を %ProgramData% → DLL ディレクトリの順で探して読み込み
+    ///
+    /// `%ProgramData%\rtry\config.json` (= `Config::config_path()`) は
+    /// Microsoft 公式仕様で MSIX/UWP のファイル仮想化対象外なので、
+    /// AppContainer (Claude Desktop App 等) 含む全プロセスから同一実体として見える。
     fn load_config() -> rtry_core::config::Config {
         let paths = [
             rtry_core::config::Config::config_path(),
@@ -140,11 +144,10 @@ impl TryCodeTextService {
     }
 
     /// テーブルファイルを探してエンジンを初期化
-    fn init_engine(&self) {
-        let config = Self::load_config();
+    fn init_engine(&self, config: &rtry_core::config::Config) {
         let paths = [
             Self::dll_dir_table_path(),
-            Self::appdata_table_path(),
+            Self::programdata_table_path(),
         ];
 
         for path in paths.into_iter().flatten() {
@@ -174,23 +177,20 @@ impl TryCodeTextService {
         Self::dll_dir_path().map(|p| p.join("try.tbl"))
     }
 
-    fn appdata_table_path() -> Option<std::path::PathBuf> {
-        std::env::var("APPDATA").ok()
-            .map(|p| std::path::PathBuf::from(p).join("rtry").join("try.tbl"))
+    fn programdata_table_path() -> Option<std::path::PathBuf> {
+        rtry_core::config::Config::config_dir().map(|p| p.join("try.tbl"))
     }
 
     fn dll_dir_mazegaki_path() -> Option<std::path::PathBuf> {
         Self::dll_dir_path().map(|p| p.join("mazegaki.dic"))
     }
 
-    fn appdata_mazegaki_path() -> Option<std::path::PathBuf> {
-        std::env::var("APPDATA").ok()
-            .map(|p| std::path::PathBuf::from(p).join("rtry").join("mazegaki.dic"))
+    fn programdata_mazegaki_path() -> Option<std::path::PathBuf> {
+        rtry_core::config::Config::config_dir().map(|p| p.join("mazegaki.dic"))
     }
 
-    /// 設定ファイルを読み込んで反映
-    fn apply_config(&self) {
-        let config = rtry_core::config::Config::load();
+    /// 設定を反映
+    fn apply_config(&self, config: &rtry_core::config::Config) {
         crate::ime_indicator::set_enabled(config.show_ime_indicator);
         crate::debug_log!("Config: show_ime_indicator={}", config.show_ime_indicator);
     }
@@ -199,7 +199,7 @@ impl TryCodeTextService {
     fn init_mazegaki_dict(&self) {
         let paths = [
             Self::dll_dir_mazegaki_path(),
-            Self::appdata_mazegaki_path(),
+            Self::programdata_mazegaki_path(),
         ];
 
         let Some(path) = paths.into_iter().flatten().find(|p| p.exists()) else {
@@ -264,9 +264,10 @@ impl ITfTextInputProcessor_Impl for TryCodeTextService_Impl {
         *self.thread_mgr.borrow_mut() = Some(thread_mgr.clone());
 
         crate::debug_log!("Activate called, tid={}", tid);
-        self.init_engine();
+        let config = TryCodeTextService::load_config();
+        self.init_engine(&config);
         self.init_mazegaki_dict();
-        self.apply_config();
+        self.apply_config(&config);
 
         // キーイベントシンクの登録
         unsafe {

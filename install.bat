@@ -42,11 +42,25 @@ if exist "%DIC_SRC%" (
     echo [OK] mazegaki.dic copied to %INSTALL_DIR%\mazegaki.dic
 )
 
-:: Copy config.json if it exists (for AppContainer apps like Claude)
-set CONFIG_SRC=%APPDATA%\rtry\config.json
-if exist "%CONFIG_SRC%" (
-    copy /y "%CONFIG_SRC%" "%INSTALL_DIR%\config.json" >nul
-    echo [OK] config.json copied to %INSTALL_DIR%\config.json
+:: Configure %ProgramData%\rtry as the shared config directory (MSIX-safe).
+:: ProgramData is excluded from MSIX/UWP file virtualization, so AppContainer
+:: apps (Claude Desktop App, etc.) read the same file as desktop processes.
+set CONFIG_DIR=%ProgramData%\rtry
+if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
+:: Grant local Users group "Modify" permission so rtry-config can save
+:: without requiring administrator rights.
+icacls "%CONFIG_DIR%" /grant *S-1-5-32-545:(OI)(CI)M >nul
+echo [OK] Config dir configured: %CONFIG_DIR%
+
+:: One-time migration: copy legacy %APPDATA%\rtry\config.json into ProgramData
+:: if the new location does not yet have one.
+set OLD_CONFIG=%APPDATA%\rtry\config.json
+set NEW_CONFIG=%CONFIG_DIR%\config.json
+if exist "%OLD_CONFIG%" (
+    if not exist "%NEW_CONFIG%" (
+        copy /y "%OLD_CONFIG%" "%NEW_CONFIG%" >nul
+        echo [OK] Migrated config: %OLD_CONFIG% -^> %NEW_CONFIG%
+    )
 )
 
 :: Copy config tool

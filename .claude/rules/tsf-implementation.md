@@ -39,18 +39,22 @@ CUAS 互換レイヤーのテキストストアは書き込み専用（`ShiftSta
 - テキスト確定後は `Collapse(TF_ANCHOR_END)` + `SetSelection` でカーソルを末尾に移動
 
 ## ファイルパスと権限
-- `C:\Program Files\rtry\`: 読み取り専用（管理者権限でのみ書き込み可）。DLL・データの配置先
-- `%APPDATA%\rtry\`: ユーザー書き込み可能。設定ファイルの保存先
-- **原則**: ユーザープロセス（rtry-config 等）が書き込むファイルは `%APPDATA%` に置く。Program Files には install.bat（管理者権限）でのみ書き込む
+- `C:\Program Files\rtry\`: 読み取り専用（管理者権限でのみ書き込み可）。DLL・try.tbl・mazegaki.dic の配置先
+- `%ProgramData%\rtry\`: 設定ファイル (config.json) の保存先。`install.bat` で作成し `icacls /grant *S-1-5-32-545:(OI)(CI)M` で Users に変更権限を付与しているため、rtry-config が管理者権限なしで保存できる
+- `%APPDATA%\rtry\`: **使わない**（MSIX のファイル仮想化対象なので使用禁止）。`install.bat` が一度だけここから ProgramData に config.json をマイグレートする
+- **原則**: 共有設定は `%ProgramData%` に置く。Program Files にはバイナリとデフォルトデータのみ。`%APPDATA%` は MSIX 環境で AppContainer ごとに別実体になるため使用しない
 
-## AppContainer 対応
-- SearchHost.exe 等は `%APPDATA%` にアクセスできない
-- DLL・データは `C:\Program Files\rtry\` に配置（AppContainer から読み取り可能）
-- 設定ファイル検索順: `%APPDATA%\rtry\` → DLL と同じディレクトリ（フォールバック）
-- ACL 対応（CorvusSKK 方式）: rtry-config が設定保存時に `ALL_APP_PACKAGES`（AC）読み取り権限を SDDL で設定
+## AppContainer / MSIX パッケージ対応
+- **核心問題**: Microsoft Store 経由の MSIX パッケージ (Claude Desktop App `Claude_pzs8sxrjxfjjc` 等) は `%APPDATA%` がパッケージ専用フォルダ (`%LOCALAPPDATA%\Packages\<PFN>\LocalCache\Roaming\`) にコピーオンライトで仮想化される。`SHGetKnownFolderPath` の `KF_FLAG_NO_PACKAGE_REDIRECTION` フラグはパス文字列の取得には効くが、その後の `std::fs::read_to_string` 等のファイルアクセスでは別機構で再仮想化されるため不十分
+- **解決策**: 設定ファイルを `%ProgramData%\rtry\config.json` に置く。ProgramData は Microsoft 仕様で MSIX/UWP のファイル仮想化対象外で、AppContainer 含む全プロセスから同一実体として見える
+- DLL・データは `C:\Program Files\rtry\` に配置（読み取り専用、AppContainer から読み取り可能）
+- 設定ファイル検索順: `%ProgramData%\rtry\config.json` → DLL と同じディレクトリ (`%ProgramFiles%\rtry\config.json`、フォールバック)
+- 念のため rtry-config は `%ProgramData%\rtry\config.json` 保存時に SDDL `(A;;FR;;;AC)` を付与（DACL は ProgramData 既定権限で十分だが、CorvusSKK 流の保険）
 
 ## インストール構成
-- DLL・データ: `C:\Program Files\rtry\`（rtry_tsf.dll, try.tbl, mazegaki.dic, config.json, debug.log）
-- `install.bat` で `%APPDATA%\rtry\config.json` を DLL ディレクトリにもコピー
+- DLL・データ: `C:\Program Files\rtry\`（rtry_tsf.dll, try.tbl, mazegaki.dic, rtry-config.exe）
+- 設定ファイル: `C:\ProgramData\rtry\config.json`
+- デバッグログ: `%TEMP%\rtry_debug.log`（Mozc/glog 流、AppContainer からも書き込み可）
+- `install.bat` が `%ProgramData%\rtry` を作成 → Users にフルコントロール付与 → 旧 `%APPDATA%\rtry\config.json` があれば一度だけマイグレート
 - プロファイル登録: `ITfInputProcessorProfileMgr::RegisterProfile`（`bEnabledByDefault: true`）
 - カテゴリ: `GUID_TFCAT_TIP_KEYBOARD`, `GUID_TFCAT_TIPCAP_IMMERSIVESUPPORT`, `GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT`
